@@ -14,19 +14,23 @@ import occgrid_to_ros
 #---------------------------------------------------------------------------------
 
 def setupBEV():
-	img_shape = (512,1024)
-	top_left_tile = np.array([426,370]) 
-	bot_left_tile = np.array([406,409])
-	top_right_tile = np.array([574,371])
-	bot_right_tile = np.array([592,410])
-	tile = np.stack((top_left_tile,bot_left_tile,top_right_tile,bot_right_tile),\
-				    axis = 0)
-	target = (0,270)
+	img_shape 		= (512,1024)
+	top_left_tile 	= np.array([426,370]) 
+	bot_left_tile 	= np.array([406,409])
+	top_right_tile 	= np.array([574,371])
+	bot_right_tile 	= np.array([592,410])
+	tile_vertices   = np.stack((top_left_tile, bot_left_tile, \
+								top_right_tile,bot_right_tile), axis = 0)
+	dist2target = (0,270)
 	tile_length = 60
-	perspective_transformer = bev_transform_tools(img_shape,target,tile_length)
-	matrix = perspective_transformer.calculate_transform_matrix(tile)
+	perspective_transformer = bev_transform_tools(img_shape, dist2target, \
+												  tile_length)
+	matrix = perspective_transformer.calculate_transform_matrix(tile_vertices)
 	perspective_transformer.create_occ_grid_param()
 	return perspective_transformer,matrix
+
+#def contour_noise_removal(segmap):
+#	h_segmap, w_segmap = 
 
 #---------------------------------------------------------------------------------
 # Initialize
@@ -45,7 +49,7 @@ model = tf.keras.models.load_model('model.hdf5')
 
 perspective_transformer,matrix = setupBEV()
 #print("Check model input:  ",model.inputs)
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture('test.webm')
 cap.set(3, 1280)
 cap.set(4, 720)
 
@@ -74,27 +78,31 @@ while True:
 
 		# Run inference and process the results
 		t0 = time.time()
-		output = model.predict(img)[0]
+		inference_result = model.predict(img)[0]
 		print('Inference FPS:  ', 1/(time.time() - t0))
-		output = np.argmax(output, axis = 0)
-		mask_viz = np.bitwise_or(output==0, output==1).astype(np.uint8)
+		result_by_class = np.argmax(inference_result, axis = 0)
+		segmap 			= np.bitwise_or(result_by_class==0, result_by_class==1)\
+										.astype(np.uint8)
 
-		# Visualize the segmap
-		(out_height, out_width) = mask_viz.shape
-		resized  	 = cv2.resize(frame, (out_width, out_height))
-		output_viz 	 = cv2.bitwise_and(resized, resized, mask=mask_viz)
-		output = cv2.resize(output_viz, (0,0), fx=3, fy=3)
-		cv2.imshow('segmap',cv2.cvtColor(output, cv2.COLOR_RGB2BGR))
+		# Visualize the segmap by masking the RGB frame
+		(out_height, out_width) = segmap.shape
+		resized_frame = cv2.resize(frame, (out_width, out_height))
+		segmap_viz 	  = cv2.bitwise_and(resized_frame, resized_frame, \
+									    mask=segmap)
+		enlarged 	  = cv2.resize(segmap_viz, (0,0), fx=3, fy=3)
+		cv2.imshow('segmap',cv2.cvtColor(enlarged, cv2.COLOR_RGB2BGR))
 
-		# Visualize the BEV
-		viz_resized  = cv2.resize(output_viz,(1024,512))
-		warped_image = cv2.warpPerspective(viz_resized, matrix,(1024,512))
-		cv2.imshow('wapred_perspective', cv2.cvtColor(warped_image, \
+		# Visualize the BEV by masking and warp the RGB frame
+		# Resize the segmap to scale with the calibration matrix
+		resized_segmap_viz	   = cv2.resize(segmap_viz,(1024,512)) 
+		warped_perspective_viz = cv2.warpPerspective(resized_segmap_viz, \
+													 matrix,(1024,512))
+		cv2.imshow('wapred_perspective', cv2.cvtColor(warped_perspective_viz, \
 													  cv2.COLOR_RGB2BGR))
 		
-		#Publish to Occupancy Grid
-		mask_viz = cv2.resize(mask_viz,(1024,512))
-		occ_grid = perspective_transformer.create_occupancy_grid(mask_viz)
+		# Publish to Occupancy Grid
+		resized_segmap = cv2.resize(segmap,(1024,512))
+		occ_grid = perspective_transformer.create_occupancy_grid(resized_segmap)
 		publisher.publish(occgrid_to_ros.og_msg(occ_grid,\
 						  perspective_transformer.map_resolution,\
 				 		  perspective_transformer.map_size))

@@ -9,13 +9,13 @@ from numpy import pi,cos,sin
 
 class bev_transform_tools:
 
-	# target : distance from camera to the target: denoted (x,y) (cm)
+	# dist2target : distance from camera to the target: denoted (x,y) (cm)
 	# x is the horizontal distance
 	# y is the vertical distance
-	def __init__(self,image_shape,target,tile_length):
+	def __init__(self,image_shape,dist2target,tile_length):
 		self.width  = image_shape[1]
 		self.height = image_shape[0]
-		self.target = target
+		self.dist2target = dist2target
 		self.tile_length = tile_length # in cm
 
 	@property
@@ -53,7 +53,8 @@ class bev_transform_tools:
 		# Hence, we derive the new origin from subtracting target location to distance from target to POV origin.
 		# The returned detranlation will translate the new origin back to its original location, which is (width/2, height)f
 
-		target_to_origin_in_pixel = np.asarray((self.target[0],self.target[1]))/ self.pixel_to_cm
+		target_to_origin_in_pixel = np.asarray((self.dist2target[0], self.dist2target[1]))\
+											   / self.pixel_to_cm
 		
 		target_after_derotation = np.dot(rotation_matrix,target_in_pixels)
 		origin_after_derotation = target_after_derotation[0:2] + target_to_origin_in_pixel
@@ -100,7 +101,7 @@ class bev_transform_tools:
 		rotation   	= self.calculate_derotation_matrix(M)
 		translation = self.calculate_detranlation_matrix(rotation,target_after_transform)
 		
-		#Merge 3 matrix together in backward order: M rotation translation 
+		#Multiply 3 matrix together in backward order: M rotation translation 
 		rot_trans 	= np.matmul(translation,rotation) 
 		
 		self.__intrinsic_matrix = np.matmul(rot_trans,M)
