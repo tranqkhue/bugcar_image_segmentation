@@ -11,7 +11,7 @@ import time
 from bev import bev_transform_tools 
 import occgrid_to_ros
 
-#---------------------------------------------------------------------------------
+#================================================================================
 
 def setupBEV():
 	img_shape 		= (512,1024)
@@ -27,24 +27,68 @@ def setupBEV():
 												  tile_length)
 	matrix = perspective_transformer.calculate_transform_matrix(tile_vertices)
 	perspective_transformer.create_occ_grid_param()
+	
 	return perspective_transformer,matrix
 
-#def contour_noise_removal(segmap):
-#	h_segmap, w_segmap = 
-
 #---------------------------------------------------------------------------------
+
+def contour_noise_removal(segmap):
+	#Close small gaps by a kernel with shape proporition to the image size
+	h_segmap, w_segmap = segmap.shape
+	min_length 		   = min(h_segmap, w_segmap)
+	kernel      = np.ones((int(min_length/50),int(min_length/50)), np.uint8)
+	closed      = cv2.morphologyEx(segmap, cv2.MORPH_CLOSE, kernel)
+
+	#Find contours of segmap
+	cnts, hie   = cv2.findContours(closed, 1, 2)
+	cnts = list(filter(lambda cnt: cnt.shape[0] > 2, cnts))
+	
+	# Create a rectangular mask in lower part of the frame
+	# If a contour intersect with this lower part above a threshold
+	# then that contour will be kept as a valid one
+
+	LENGTH_RATIO	= 0.1
+	x_left  = 0
+	x_right = w_segmap
+	y_top 	= int(h_segmap* LENGTH_RATIO)
+	y_bot 	= h_segmap
+	bottom_rect = np.array([(x_left,  y_top), (x_right, y_top),\
+							(x_right, y_bot), (x_left,  y_bot)])
+	bottom_mask = np.zeros_like(segmap)
+	mask_area 	= (x_right - x_left) * (y_bot - y_top)
+	cv2.fillPoly(bottom_mask, [bottom_rect], 1)
+
+	# Iterate through contour[S]
+	MASK_AREA_THRESH = 0.1 #The threshold of intersect over whole mask area
+	main_road_cnts = []
+	for cnt in cnts:
+		cnt_map = np.zeros_like(segmap)
+		cv2.fillPoly(cnt_map, [cnt], 1)
+		masked   = cv2.bitwise_and(cnt_map, bottom_mask).astype(np.uint8)
+		intersected_area = np.count_nonzero(masked)
+		#print("Mask_area:  ", mask_area)
+		#print("Contour:  ", intersected_area, "  Area:  ", intersected_area)
+		if (intersected_area > (mask_area*MASK_AREA_THRESH)):
+			main_road_cnts.append(cnt)
+
+	contour_noise_removed = np.zeros(segmap.shape).astype(np.uint8)
+	cv2.fillPoly(contour_noise_removed, main_road_cnts, 255)
+
+	return contour_noise_removed
+
+#================================================================================
 # Initialize
 publisher = occgrid_to_ros.init_node()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 #print('Check available GPUS:  ', gpus)
 if gpus:
-  try:
-    tf.config.experimental.set_memory_growth(gpus[0], True)
-    tf.config.experimental.set_virtual_device_configuration(gpus[0], \
-    	[tf.config.experimental.VirtualDeviceConfiguration(memory_limit=600)])
-  except RuntimeError as e:
-    print(e)
+	try:
+		tf.config.experimental.set_memory_growth(gpus[0], True)
+		tf.config.experimental.set_virtual_device_configuration(gpus[0], \
+			[tf.config.experimental.VirtualDeviceConfiguration(memory_limit=600)])
+	except RuntimeError as e:
+		print(e)
 model = tf.keras.models.load_model('model.hdf5')
 
 perspective_transformer,matrix = setupBEV()
@@ -84,13 +128,19 @@ while True:
 		segmap 			= np.bitwise_or(result_by_class==0, result_by_class==1)\
 										.astype(np.uint8)
 
+		# Remove road branches (or noise) that are not connected to main branches
+		# Main road branches go from the bottom part of the RGB map
+		# (should be) right front of the vehicle
+		conour_noise_removed = contour_noise_removal(segmap)
+
 		# Visualize the segmap by masking the RGB frame
-		(out_height, out_width) = segmap.shape
+		(out_height, out_width) = conour_noise_removed.shape
 		resized_frame = cv2.resize(frame, (out_width, out_height))
 		segmap_viz 	  = cv2.bitwise_and(resized_frame, resized_frame, \
-									    mask=segmap)
-		enlarged 	  = cv2.resize(segmap_viz, (0,0), fx=3, fy=3)
-		cv2.imshow('segmap',cv2.cvtColor(enlarged, cv2.COLOR_RGB2BGR))
+										mask=conour_noise_removed)
+		enlarged_viz  = cv2.resize(segmap_viz, (0,0), fx=3, fy=3)
+		cv2.imshow('segmap_cnt_noise_removal', cv2.cvtColor(enlarged_viz, \
+															cv2.COLOR_RGB2BGR))
 
 		# Visualize the BEV by masking and warp the RGB frame
 		# Resize the segmap to scale with the calibration matrix
@@ -101,13 +151,14 @@ while True:
 													  cv2.COLOR_RGB2BGR))
 		
 		# Publish to Occupancy Grid
-		resized_segmap = cv2.resize(segmap,(1024,512))
+		# Need to resize to be the same with the image size in calibration process
+		resized_segmap = cv2.resize(conour_noise_removed,(1024,512))
 		occ_grid = perspective_transformer.create_occupancy_grid(resized_segmap)
 		publisher.publish(occgrid_to_ros.og_msg(occ_grid,\
 						  perspective_transformer.map_resolution,\
-				 		  perspective_transformer.map_size))
+						  perspective_transformer.map_size))
 
-	if cv2.waitKey(25) & 0xFF ==ord('q'):
+	if (cv2.waitKey(25) & 0xFF ==ord('q')) | (ret == False):
 		cap.release()
 		cv2.destroyAllWindows()
 		break	
