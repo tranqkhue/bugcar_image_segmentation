@@ -32,6 +32,28 @@ def setupBEV():
 
 #---------------------------------------------------------------------------------
 
+def enet_preprocessing(bgr_frame):
+	IMAGE_MEAN = np.array([0.485, 0.456, 0.406])
+	IMAGE_STD  = np.array([0.229, 0.224, 0.225])
+	input_size = (512,256)
+
+	resized =  cv2.resize(bgr_frame, input_size)
+	rgb 	=  cv2.cvtColor(resized,cv2.COLOR_BGR2RGB)
+	#rotate = cv2.rotate(rgb, cv2.cv2.ROTATE_180)
+	cv2.imshow('input', cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+
+	# Normalize, some statistics and stack into a batch for interference
+	normalized  = rgb/256.0
+	subtracted  = np.subtract(normalized, IMAGE_MEAN)
+	divided	    = np.divide(subtracted, IMAGE_STD)
+	swap_axesed = np.swapaxes(divided, 1, 2)
+	swap_axesed = np.swapaxes(swap_axesed, 0, 1)
+	batch 		= np.array([swap_axesed])
+
+	return batch
+
+#---------------------------------------------------------------------------------
+
 def contour_noise_removal(segmap):
 	#Close small gaps by a kernel with shape proporition to the image size
 	h_segmap, w_segmap = segmap.shape
@@ -99,31 +121,17 @@ cap.set(4, 720)
 
 #---------------------------------------------------------------------------------
 
-IMAGE_MEAN = np.array([0.485, 0.456, 0.406])
-IMAGE_STD  = np.array([0.229, 0.224, 0.225])
-input_size = (256,128)
-
 while True:
+	t0 = time.time()
 	ret, frame = cap.read()
 	if (ret == True):
 		# Prepocessing input
-		frame = cv2.resize(frame,input_size)
-		frame = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
-		#frame = cv2.rotate(frame, cv2.cv2.ROTATE_180)
-		cv2.imshow('input',cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-
-		# Normalize and stack into a batch for interference
-		img = frame/256.0
-		img = np.subtract(img,IMAGE_MEAN)
-		img = np.divide(img,IMAGE_STD)
-		img = np.swapaxes(img, 1, 2)
-		img = np.swapaxes(img, 0, 1)
-		img = np.array([img])
+		batch_frame = enet_preprocessing(frame)
 
 		# Run inference and process the results
-		t0 = time.time()
-		inference_result = model.predict(img)[0]
-		print('Inference FPS:  ', 1/(time.time() - t0))
+		t1 = time.time()
+		inference_result = model.predict(batch_frame)[0]
+		inference_fps = 1/(time.time() - t1)
 		result_by_class = np.argmax(inference_result, axis = 0)
 		segmap 			= np.bitwise_or(result_by_class==0, result_by_class==1)\
 										.astype(np.uint8)
@@ -153,10 +161,14 @@ while True:
 		# Publish to Occupancy Grid
 		# Need to resize to be the same with the image size in calibration process
 		resized_segmap = cv2.resize(conour_noise_removed,(1024,512))
-		occ_grid = perspective_transformer.create_occupancy_grid(resized_segmap)
-		publisher.publish(occgrid_to_ros.og_msg(occ_grid,\
-						  perspective_transformer.map_resolution,\
-						  perspective_transformer.map_size))
+		occ_grid 	= perspective_transformer.create_occupancy_grid(resized_segmap)
+		msg  		= occgrid_to_ros.og_msg(occ_grid,\
+											perspective_transformer.map_resolution,\
+											perspective_transformer.map_size)
+		publisher.publish(msg)
+
+	print('Inference FPS:  ',  round(inference_fps, 2), ' | ',\
+		  'Total loop FPS:  ', round(1/(time.time()-t1), 2))
 
 	if (cv2.waitKey(25) & 0xFF ==ord('q')) | (ret == False):
 		cap.release()

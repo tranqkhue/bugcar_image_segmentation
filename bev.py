@@ -34,9 +34,9 @@ class bev_transform_tools:
 		bot_left_corner  = bot_left_corner / bot_left_corner[2]
 		bot_right_corner = np.dot(M,np.array([self.width,self.height,1]))
 		bot_right_corner = bot_right_corner / bot_right_corner[2]
-		diagonal_line = np.stack((bot_left_corner,bot_right_corner),axis = 0)
-		angle = np.arctan2((diagonal_line[1][1]-diagonal_line[0][1]), (\
-							diagonal_line[1][0]-diagonal_line[0][0]))
+		diagonal_line 	 = np.stack((bot_left_corner,bot_right_corner),axis = 0)
+		angle 	 = np.arctan2((diagonal_line[1][1]-diagonal_line[0][1]),\
+							  (diagonal_line[1][0]-diagonal_line[0][0]))
 		rotation = np.array([[np.cos(angle) , -np.sin(angle),0],
 				     [np.sin(angle), np.cos(angle),0],
 				     [0,0,1]])
@@ -146,18 +146,15 @@ class bev_transform_tools:
 												 int(warped_height-50/self.pixel_to_cm)), \
 												 front_value, -1)
 		#warped_img = cv2.rectangle(warped_img, (0,0),(100,100),1,-1)
-		#)
 		#occupancy_grid = (np.ones((self.__occ_grid,self.__occ_grid))* -1).astype(np.int8)
-		#)
 		#visible_version_grid = np.zeros((self.occ_gridY,self.occ_gridX,3))
 		occupancy_grid = cv2.resize(warped_img,(self.__occ_grid,self.__occ_grid),\
 									interpolation=cv2.INTER_NEAREST)*100
 		occupancy_grid = np.where(occupancy_grid == 0 , -1, 200 - occupancy_grid)
 		occupancy_grid = cv2.flip(occupancy_grid,0)
 		occupancy_grid = cv2.rotate(occupancy_grid,cv2.ROTATE_90_COUNTERCLOCKWISE)
-		#occupancy_grid = np.add(occupancy_grid,first_map*100)
-		#occupancy_grid = np.add(occupancy_grid,)
-		#))
+
+		occupancy_grid = occupancy_grid.astype('int8')
 		return occupancy_grid 
 
 #==========================================================================================

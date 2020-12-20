@@ -8,11 +8,15 @@ from geometry_msgs.msg import Pose
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import Quaternion
 
+#---------------------------------------------------------------------------------
+
 def init_node():
 	rospy.init_node("image_segmentation")
 	map_topic = "map/image_segmentation"
 	OG_publisher = rospy.Publisher(map_topic, OccupancyGrid, queue_size=5, latch=True)
 	return OG_publisher
+
+#---------------------------------------------------------------------------------
 
 def og_msg(occ_grid,map_resolution,map_size):
 	MAP_RESOLUTION = map_resolution #Unit: Meter
