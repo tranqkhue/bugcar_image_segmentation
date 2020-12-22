@@ -167,8 +167,8 @@ while True:
 											perspective_transformer.map_size)
 		publisher.publish(msg)
 
-	print('Inference FPS:  ',  round(inference_fps, 2), ' | ',\
-		  'Total loop FPS:  ', round(1/(time.time()-t1), 2))
+	print('Inference FPS:  ',  format(inference_fps, '.2f'), ' | ',\
+		  'Total loop FPS:  ', format(1/(time.time()-t0), '.2f'))
 
 	if (cv2.waitKey(25) & 0xFF ==ord('q')) | (ret == False):
 		cap.release()
