@@ -94,7 +94,7 @@ def contour_noise_removal(segmap):
 			main_road_cnts.append(cnt)
 
 	contour_noise_removed = np.zeros(segmap.shape).astype(np.uint8)
-	cv2.fillPoly(contour_noise_removed, main_road_cnts, 255)
+	cv2.fillPoly(contour_noise_removed, main_road_cnts, 1)
 
 	return contour_noise_removed
 
