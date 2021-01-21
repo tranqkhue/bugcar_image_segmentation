@@ -6,6 +6,62 @@ from numpy import pi,cos,sin
 # When dealing with OpenCV functions
 # Numpy dimension order should be [height,width]
 # Not to be confused with [x,y] axis
+def setupBEVLongRange():
+	img_shape = (512,1024)
+	# first number is x , second number is y
+	top_left_tile  = np.array([489,380]) 
+	bot_left_tile  = np.array([483,396])
+	top_right_tile = np.array([580,380])
+	bot_right_tile = np.array([578,396])
+	tile = np.stack((top_left_tile,bot_left_tile,top_right_tile,bot_right_tile),axis = 0)
+	target = (0,510)
+	tile_length = 60
+	perspective_transformer = bev_transform_tools(img_shape,target,tile_length)
+	matrix = perspective_transformer.calculate_transform_matrix(tile)
+	perspective_transformer.create_occ_grid_param()
+	print("cm per pixel",perspective_transformer.cm_per_px)
+	return perspective_transformer,matrix
+
+def setupBEVShortRange():
+	#there should be 2 bev parameter for each range, this is for distance from 3m 
+	img_shape = (512,1024)
+	# first number is x , second number is y
+	top_left_tile  = np.array([441,437]) 
+	bot_left_tile  = np.array([437,471])
+	top_right_tile = np.array([568,437])
+	bot_right_tile = np.array([588,471])
+	tile = np.stack((top_left_tile,bot_left_tile,top_right_tile,bot_right_tile),axis = 0)
+	target = (0,330)
+	tile_length = 60
+	perspective_transformer = bev_transform_tools(img_shape,target,tile_length)
+	matrix = perspective_transformer.calculate_transform_matrix(tile)
+	perspective_transformer.create_occ_grid_param()
+	print("cm per pixel",perspective_transformer.cm_per_px)
+	return perspective_transformer,matrix
+
+def sort_by_height(e):
+    return e[1]
+def order_point(points):
+    height_sorted = points.sort(key=sort_by_height)
+    top_points = height_sorted[:2]
+    bot_points = height_sorted[2:]
+    if top_points[0][0] > top_points[1][0]:
+        top_left_point = top_points[1]
+        top_right_point = top_points[0]
+    else:
+        top_left_point = top_points[0]
+        top_right_point = top_points[1]
+    if bot_points[0][0] > bot_points[1][0]:
+        bot_left_point = bot_points[1]
+        bot_right_point = bot_points[0]
+    else:
+        bot_left_point = bot_points[0]
+        bot_right_point = bot_points[1]
+    return [top_left_point,bot_left_point,top_right_point,bot_right_point]
+def setupBEV():
+	# bugs: setting long range bev will distort short range object.
+	#idea : setting different bev ratio for different distance?
+	return setupBEVShortRange()
 
 class bev_transform_tools:
 
@@ -54,7 +110,7 @@ class bev_transform_tools:
 		# The returned detranlation will translate the new origin back to its original location, which is (width/2, height)f
 
 		target_to_origin_in_pixel = np.asarray((self.dist2target[0], self.dist2target[1]))\
-											   / self.pixel_to_cm
+											   / self.cm_per_px
 		
 		target_after_derotation = np.dot(rotation_matrix,target_in_pixels)
 		origin_after_derotation = target_after_derotation[0:2] + target_to_origin_in_pixel
@@ -88,8 +144,8 @@ class bev_transform_tools:
 		max_height = 12 #int(max_height_tile/zoom_out_ratio) #max height should be 12		
 		self.tile_length_pixel = max_height 
 		#print(self.tile_length)
-		self.pixel_to_cm = self.tile_length / self.tile_length_pixel # this is cm/px
-		print('Pixel to meter factor: ', self.pixel_to_cm)
+		self.cm_per_px = self.tile_length / self.tile_length_pixel # this is cm/px
+		print('Pixel to centimeter factor: ', self.cm_per_px)
 
 		dest = np.array([[0,0],[0,max_height-1],[max_height-1,0],[max_height-1,max_height-1]],dtype=np.float32)
 		top_left_tile_array = np.stack([top_left_tile for i in range(4)])
@@ -117,8 +173,8 @@ class bev_transform_tools:
 	def create_occ_grid_param(self):
 		# Occupancy grid should be square 
 		# Should show every object in the 5m radius
-		self.__cell_size = int(10 / self.pixel_to_cm)  # all of these size are in pixels unit
-		self.__cell_size_in_m = self.pixel_to_cm * self.__cell_size /100 # except this
+		self.__cell_size = int(10 / self.cm_per_px)  # all of these size are in pixels unit
+		self.__cell_size_in_m = self.cm_per_px * self.__cell_size /100 # except this
 		print('Occupancy Grid cell to meter', self.__cell_size_in_m)		
 		self.__occ_grid = int(10 / self.__cell_size_in_m)
 		self.__occ_edge_pixel = self.__occ_grid * self.__cell_size
@@ -136,14 +192,14 @@ class bev_transform_tools:
 		warped_img = warped_img[y-(self.__occ_grid)*cell_size:y,x:x+self.__occ_edge_pixel]
 		warped_width,warped_height = warped_img.shape
 
-		front_value = warped_img[int(warped_height-175/self.pixel_to_cm):int(warped_height-170/self.pixel_to_cm),
-							     int(warped_width/2-100/self.pixel_to_cm):int(warped_width/2+100/self.pixel_to_cm)]
+		front_value = warped_img[int(warped_height-175/self.cm_per_px):int(warped_height-170/self.cm_per_px),
+							     int(warped_width/2-100/self.cm_per_px):int(warped_width/2+100/self.cm_per_px)]
 		front_value = np.mean(front_value)
 		front_value = int(np.round(front_value))
-		warped_img  = cv2.rectangle(warped_img, (int(warped_width/2-100/self.pixel_to_cm),\
-												 int(warped_height-170/self.pixel_to_cm)),\
-												(int(warped_width/2+100/self.pixel_to_cm),\
-												 int(warped_height-50/self.pixel_to_cm)), \
+		warped_img  = cv2.rectangle(warped_img, (int(warped_width/2-100/self.cm_per_px),\
+												 int(warped_height-170/self.cm_per_px)),\
+												(int(warped_width/2+100/self.cm_per_px),\
+												 int(warped_height-50/self.cm_per_px)), \
 												 front_value, -1)
 		#warped_img = cv2.rectangle(warped_img, (0,0),(100,100),1,-1)
 		#occupancy_grid = (np.ones((self.__occ_grid,self.__occ_grid))* -1).astype(np.int8)

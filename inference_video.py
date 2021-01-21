@@ -103,7 +103,6 @@ def contour_noise_removal(segmap):
 publisher = occgrid_to_ros.init_node()
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
-#print('Check available GPUS:  ', gpus)
 if gpus:
 	try:
 		tf.config.experimental.set_memory_growth(gpus[0], True)
@@ -115,7 +114,7 @@ model = tf.keras.models.load_model('model.hdf5')
 
 perspective_transformer,matrix = setupBEV()
 #print("Check model input:  ",model.inputs)
-cap = cv2.VideoCapture('test.webm')
+cap = cv2.VideoCapture('../data/test.webm')
 cap.set(3, 1280)
 cap.set(4, 720)
 
@@ -160,7 +159,9 @@ while True:
 		
 		# Publish to Occupancy Grid
 		# Need to resize to be the same with the image size in calibration process
+		print(np.histogram(conour_noise_removed))
 		resized_segmap = cv2.resize(conour_noise_removed,(1024,512))
+		# print(np.histogram(resized_segmap))
 		occ_grid 	= perspective_transformer.create_occupancy_grid(resized_segmap)
 		msg  		= occgrid_to_ros.og_msg(occ_grid,\
 											perspective_transformer.map_resolution,\
