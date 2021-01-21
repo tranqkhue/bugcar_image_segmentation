@@ -20,7 +20,7 @@ try:
 		rgb_intrin = pipeline_rgb_frame.profile.as_video_stream_profile().intrinsics
 
 		frame = np.asanyarray(pipeline_rgb_frame.get_data())
-		frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+		frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
 		fx    = pipeline_rgb_frame.profile.as_video_stream_profile().intrinsics.fx
 		fy    = pipeline_rgb_frame.profile.as_video_stream_profile().intrinsics.fy
