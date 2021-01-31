@@ -2,7 +2,7 @@ import cv2
 import csv
 import rospy
 import numpy as np
-from fiducial_msgs.msg import FiducialTransformArray
+
 from bev import bev_transform_tools
 
 # def test_device(source):
@@ -122,6 +122,9 @@ try:
         if rvec is not None:
             rvec = np.array(rvec)
             tvec = np.array(tvec)[0][0]
+            # print(rvec[0][0])
+            normalized_rvec = abs(rvec)%(np.pi/2)
+            print(np.degrees(normalized_rvec[0][0]))
             distance_z = tvec[2]
             distance_x = tvec[0]
             distance_y = tvec[1]
