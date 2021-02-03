@@ -85,7 +85,7 @@ MARKER_LENGTH = 0.269
 import pyrealsense2 as rs
 pipeline = rs.pipeline()
 config = rs.config()
-config.enable_stream(rs.stream.color, 1280, 720, rs.format.rgb8, 30)
+config.enable_stream(rs.stream.color, 1280, 720, rs.format.rgb8, 15)
 pipeline.start(config)
 try:
     while True:
@@ -120,19 +120,51 @@ try:
         rvec = result[0]
         tvec = result[1]
         if rvec is not None:
-            rvec = np.array(rvec)
+            for point in corners[0][0]:
+                cv2.circle(frame, (point[0], point[1]), 1, (0, 255, 0), -1)
+
             tvec = np.array(tvec)[0][0]
-            distance_z = tvec[2]
-            distance_x = tvec[0]
-            distance_y = tvec[1]
             # there are 3 kind of distance x,y,z:
             # z is how far you are from the target
             # x is how 'left'ish you are from the target. >0 means your camera is to the left of the target
             # y is how 'down'ish your are from the target. >0 means that the target is above the baseline of your camera
-            cv2.aruco.drawAxis(frame, K, distortion_coeffs, rvec, tvec, 0.1)
-        frame = cv2.resize(frame, (1024, 512))
+            distance_z = tvec[2]
+            distance_x = tvec[0]
+            distance_y = tvec[1]
+            yaw = 0
+            # rvec is the orientation of the camera relative to the aruco marker.
+            # Sometimes, there will be 2 possible rotation vectors for 1 marker.
+            # It is not clear as to what is causing this behaviour, further research needed!
+
+            for rotation in rvec:
+                # print(rotation)
+                rotation_matrix, _ = cv2.Rodrigues(rotation)
+                rotation_matrix = np.linalg.inv(rotation_matrix)
+                # print(rotation_matrix)
+                yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
+                # pitch = np.arctan2(
+                #     -rotation_matrix[2, 0],
+                #     np.sqrt(rotation_matrix[2, 1]**2 +
+                #             rotation_matrix[2, 2]**2))
+                # roll = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
+                print(np.degrees(yaw))
+                cv2.aruco.drawAxis(frame, K, distortion_coeffs, rotation, tvec,
+                                   0.1)
+                # aruco:
+                # blue  represent z axis
+                # red represent x axis
+                # green represent y axis
+
+                # camera axes:
+                # y-axis heads downward
+                # x-axis heads right
+                # z-axis heads forward
+                # to sum up, camera axes follows NED format.
+
+        frame = cv2.resize(frame, (1024, 512), interpolation=cv2.INTER_AREA)
+
         for point in square_markers:
-            cv2.circle(frame, (point[0], point[1]), 2, (255, 0, 0), -1)
+            cv2.circle(frame, (point[0], point[1]), 1, (255, 0, 0), -1)
         cv2.imshow('image', frame)
         key = cv2.waitKey(25)
         if (key & 0xFF == 8):  # this is backspace button
@@ -149,7 +181,7 @@ try:
                 MARKER_LENGTH * 100)
             ordered_tile_coords = order_point(square_markers)
             print(ordered_tile_coords)
-            bev_tool.calculate_transform_matrix(ordered_tile_coords)
+            bev_tool.calculate_transform_matrix(ordered_tile_coords, yaw)
             print(bev_tool.dero, bev_tool.detran, bev_tool.M)
             bev_tool.create_occ_grid_param(10, 0.1)
             bev_tool.save_to_JSON("calibration_data.json")

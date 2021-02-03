@@ -118,17 +118,9 @@ class bev_transform_tools:
         json.dump(data, f)
 
     def _calculate_derotation_matrix(self, M):
-        # Find the rotation matrix to make the bottom line straight again
-        # Counter-clockwise rotation
-        bot_left_corner = np.dot(M, np.array([0, self.height, 1]))
-        bot_left_corner = bot_left_corner / bot_left_corner[2]
-        bot_right_corner = np.dot(M, np.array([self.width, self.height, 1]))
-        bot_right_corner = bot_right_corner / bot_right_corner[2]
-        diagonal_line = np.stack((bot_left_corner, bot_right_corner), axis=0)
-        angle = np.arctan2((diagonal_line[1][1] - diagonal_line[0][1]),
-                           (diagonal_line[1][0] - diagonal_line[0][0]))
-        rotation = np.array([[np.cos(angle), -np.sin(angle), 0],
-                             [np.sin(angle), np.cos(angle), 0], [0, 0, 1]])
+        rotation = np.array([[np.cos(self.yaw), -np.sin(self.yaw), 0],
+                             [np.sin(self.yaw),
+                              np.cos(self.yaw), 0], [0, 0, 1]])
         self.dero = rotation
         return rotation
 
@@ -160,7 +152,8 @@ class bev_transform_tools:
 
     # --------------------------------------------------------------------------------------
 
-    def calculate_transform_matrix(self, tile_coords):
+    def calculate_transform_matrix(self, tile_coords, yaw):
+        self.yaw = yaw
         # Choose 4 corner of the white tile
         top_left_tile = tile_coords[0]
         bot_left_tile = tile_coords[1]
