@@ -4,31 +4,63 @@ import rospy
 import numpy as np
 from fiducial_msgs.msg import FiducialTransformArray
 from bev import bev_transform_tools
+import matplotlib.pyplot as plt
+import asyncio
+import pyrealsense2 as rs
 
-# def test_device(source):
-#     cap = cv2.VideoCapture(source)
-#     if cap is None or not cap.isOpened():
-#         print("Warning: unable to open video source ", source)
-#         return False, cap
-#     return True, cap
-
-# isValid = False
-# available_cam = []
-# for i in range(8):
-#     isValid, cap_test = test_device(i)
-#     if isValid:
-#         available_cam.append(cap_test)
-# cap = available_cam[2]
-
-
-def sort_by_height(haha):
-    return haha[1]
+is_calibrating = False
+frame = []
+ordered_corners_list = []
+refined_corners = []
+distance_z = -1
+distance_x = -1
+aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
+aruco_params = cv2.aruco.DetectorParameters_create()
+REALSENSE_RESOLUTION = (1280, 720)
+FPS = 15
+IMG_SHAPE = (1024, 512)
+resize_ratio = (IMG_SHAPE[0] / REALSENSE_RESOLUTION[0],
+                IMG_SHAPE[1] / REALSENSE_RESOLUTION[1])
+MARKER_LENGTH = 0.557
 
 
-def order_point(points):
+def clahe(img):
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+
+    #-----Splitting the LAB image to different channels-------------------------
+    l, a, b = cv2.split(lab)
+
+    #-----Applying CLAHE to L-channel-------------------------------------------
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    cl = clahe.apply(l)
+
+    #-----Merge the CLAHE enhanced L-channel with the a and b channel-----------
+    limg = cv2.merge((cl, a, b))
+
+    #-----Converting image from LAB Color model to RGB model--------------------
+    final = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    return final
+
+
+def calibrate_with_median(corners_list):
+    global is_calibrating, refined_corners
+    is_calibrating = False
+    corners_list = np.asarray(corners_list)
+    fig, ax = plt.subplots(2, 2)
+    for i in range(4):
+        x = corners_list[:, i, 0]
+        y = corners_list[:, i, 1]
+        refined_corners.append(np.array([np.median(x), np.median(y)]))
+        ax[i // 2, i % 2].hist2d(x, y)
+    plt.show()
+    plt.close(fig=fig)
+    refined_corners = order_points(refined_corners)
+    print(refined_corners)
+
+
+def order_points(points):
     sort_by_height = lambda e: e[1]
     points.sort(key=sort_by_height)
-    print(points)
     top_points = points[:2]
     bot_points = points[2:]
     if top_points[0][0] > top_points[1][0]:
@@ -48,147 +80,155 @@ def order_point(points):
         [top_left_point, bot_left_point, top_right_point, bot_right_point])
 
 
-# camera_matrix = np.array([626.587239 ,0.0 ,318.410833 ,0.0 ,627.261398 ,245.357087 ,0.0 ,0.0, 1.0])
-# camera_matrix = np.reshape(camera_matrix,(3,3))
-# distortion_coeffs = np.array([0.186030, -0.475013, 0.000964 ,-0.006895 ,0.0])
-# this is the matrix we get from camera_calibration
+def main():
+    global is_calibrating
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.color, REALSENSE_RESOLUTION[0],
+                         REALSENSE_RESOLUTION[1], rs.format.rgb8, FPS)
+    pipeline.start(config)
+    try:
+        while True:
+            #find camera matrix and distortion coefficient
+            #================================================
+            pipeline_frames = pipeline.wait_for_frames()
+            pipeline_rgb_frame = pipeline_frames.get_color_frame()
+            rgb_intrin = pipeline_rgb_frame.profile.as_video_stream_profile(
+            ).intrinsics
 
-camera_matrix = np.array([
-    615.1647338867188, 0.0, 319.7691345214844, 0.0, 615.38037109375,
-    242.72280883789062, 0.0, 0.0, 1.0
-])
-camera_matrix = np.reshape(camera_matrix, (3, 3))
-distortion_coeffs = np.array([0.0, 0.0, 0.0, 0.0, 0.0])
-# this is the matrix we get from camera_info
+            frame = np.asanyarray(pipeline_rgb_frame.get_data())
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
 
-frame = []
-square_markers = []
-distance_z = -1
-distance_x = -1
+            fx = pipeline_rgb_frame.profile.as_video_stream_profile(
+            ).intrinsics.fx
+            fy = pipeline_rgb_frame.profile.as_video_stream_profile(
+            ).intrinsics.fy
+            ppx = pipeline_rgb_frame.profile.as_video_stream_profile(
+            ).intrinsics.ppx
+            ppy = pipeline_rgb_frame.profile.as_video_stream_profile(
+            ).intrinsics.ppy
+            K = np.array([[fx, 0, ppx], [0, fy, ppy], [0, 0, 1]])
+            distortion_coeffs = np.array(
+                pipeline_rgb_frame.profile.as_video_stream_profile(
+                ).intrinsics.coeffs)
+            #================================================
 
+            #detect corners and relative pose of fiducial to the camera.
+            #================================================
+            (corners, ids,
+             rejected) = cv2.aruco.detectMarkers(clahe(frame),
+                                                 aruco_dict,
+                                                 parameters=aruco_params)
+            result = cv2.aruco.estimatePoseSingleMarkers(
+                corners,
+                markerLength=MARKER_LENGTH,
+                distCoeffs=distortion_coeffs,
+                cameraMatrix=K)
+            #================================================
 
-def addPoint(event, x, y, flags, param):
-    if event == cv2.EVENT_LBUTTONDOWN:
-        if (len(square_markers) == 4):
-            print("already have 4 points")
-            return
-        square_markers.append((x, y))
+            # set the logic for calibrating aruco's marked corners, which basically can jump anywhere(based on observation) within the 10x10 square
+            # in the vicinity of the true corner.
+            # To tackle this, for each calibration process during which the marker must be fixed,
+            # 100 samples of the corners' position are collected and passed through a median filter.
+            # The result will be the conclusive corners of the marker.
+            #================================================
 
+            if len(corners) > 0:
+                for point in corners[0][0]:
+                    cv2.circle(frame, (point[0], point[1]), 0, (0, 255, 0), -1)
+                if is_calibrating == True:
+                    if len(ordered_corners_list) < 100:
+                        # these are the point before being resized
+                        resized_corner = np.round(resize_ratio * corners[0][0])
+                        ordered_points = order_points(resized_corner.tolist())
+                        ordered_corners_list.append(ordered_points)
+                    else:
+                        calibrate_with_median(ordered_corners_list)
+            #================================================
 
-cv2.namedWindow('image')
-cv2.setMouseCallback("image", addPoint)
-aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
-aruco_params = cv2.aruco.DetectorParameters_create()
-IMG_SHAPE = (1024, 512)
-MARKER_LENGTH = 0.269
+            #processing translation vector information
+            # translation vector represent the position of camera relative to the fiducial marker, more info below
+            #================================================
+            tvec = result[1]
+            if tvec is not None:
+                tvec = np.array(tvec)[0][0]
+                # there are 3 kind of distances with respect to 3 axes x,y,z:
+                # z is how far you are from the target
+                # x is how left you are from the target. >0 means your camera is to the left of the target
+                # y is how low your are from the target. >0 means that the target is above the baseline of your camera
+                distance_z = tvec[2]
+                distance_x = tvec[0]
+                distance_y = tvec[1]
+            #================================================
 
-import pyrealsense2 as rs
-pipeline = rs.pipeline()
-config = rs.config()
-config.enable_stream(rs.stream.color, 1280, 720, rs.format.rgb8, 15)
-pipeline.start(config)
-try:
-    while True:
-        pipeline_frames = pipeline.wait_for_frames()
-        pipeline_rgb_frame = pipeline_frames.get_color_frame()
-        rgb_intrin = pipeline_rgb_frame.profile.as_video_stream_profile(
-        ).intrinsics
+            # Find the yaw of camera with respect to the aruco's coordinate frame
+            #================================================
+            rvec = result[0]
+            if rvec is not None:
 
-        frame = np.asanyarray(pipeline_rgb_frame.get_data())
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # rvec is the orientation of the camera relative to the aruco marker.
+                # Sometimes, there will be 2 possible rotation vectors for 1 marker.
+                # It is not clear as to what is causing this behaviour, further research needed!
+                for rotation in rvec:
+                    rotation_matrix, _ = cv2.Rodrigues(rotation)
+                    rotation_matrix = np.linalg.inv(rotation_matrix)
+                    yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0,
+                                                                            0])
 
-        fx = pipeline_rgb_frame.profile.as_video_stream_profile().intrinsics.fx
-        fy = pipeline_rgb_frame.profile.as_video_stream_profile().intrinsics.fy
-        ppx = pipeline_rgb_frame.profile.as_video_stream_profile(
-        ).intrinsics.ppx
-        ppy = pipeline_rgb_frame.profile.as_video_stream_profile(
-        ).intrinsics.ppy
-        K = np.array([[fx, 0, ppx], [0, fy, ppy], [0, 0, 1]])
-        distortion_coeffs = np.array(
-            pipeline_rgb_frame.profile.as_video_stream_profile(
-            ).intrinsics.coeffs)
+                    cv2.aruco.drawAxis(frame, K, distortion_coeffs, rotation,
+                                       tvec, 0.1)
+                    # aruco:
+                    # blue  represent z axis
+                    # red represent x axis
+                    # green represent y axis
 
-        (corners, ids,
-         rejected) = cv2.aruco.detectMarkers(frame,
-                                             aruco_dict,
-                                             parameters=aruco_params)
-        result = cv2.aruco.estimatePoseSingleMarkers(
-            corners,
-            markerLength=MARKER_LENGTH,
-            distCoeffs=distortion_coeffs,
-            cameraMatrix=K)
-        rvec = result[0]
-        tvec = result[1]
-        if rvec is not None:
-            for point in corners[0][0]:
-                cv2.circle(frame, (point[0], point[1]), 1, (0, 255, 0), -1)
+                    # camera axes:
+                    # y-axis heads downward
+                    # x-axis heads right
+                    # z-axis heads forward
+                    # to sum up, camera axes follows NED format.
 
-            tvec = np.array(tvec)[0][0]
-            # there are 3 kind of distance x,y,z:
-            # z is how far you are from the target
-            # x is how 'left'ish you are from the target. >0 means your camera is to the left of the target
-            # y is how 'down'ish your are from the target. >0 means that the target is above the baseline of your camera
-            distance_z = tvec[2]
-            distance_x = tvec[0]
-            distance_y = tvec[1]
-            yaw = 0
-            # rvec is the orientation of the camera relative to the aruco marker.
-            # Sometimes, there will be 2 possible rotation vectors for 1 marker.
-            # It is not clear as to what is causing this behaviour, further research needed!
+            #================================================
 
-            for rotation in rvec:
-                # print(rotation)
-                rotation_matrix, _ = cv2.Rodrigues(rotation)
-                rotation_matrix = np.linalg.inv(rotation_matrix)
-                # print(rotation_matrix)
-                yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0, 0])
-                # pitch = np.arctan2(
-                #     -rotation_matrix[2, 0],
-                #     np.sqrt(rotation_matrix[2, 1]**2 +
-                #             rotation_matrix[2, 2]**2))
-                # roll = np.arctan2(rotation_matrix[2, 1], rotation_matrix[2, 2])
-                print(np.degrees(yaw))
-                cv2.aruco.drawAxis(frame, K, distortion_coeffs, rotation, tvec,
-                                   0.1)
-                # aruco:
-                # blue  represent z axis
-                # red represent x axis
-                # green represent y axis
+            # special keys to interact with the program
+            #================================================
+            frame = cv2.resize(frame, (1024, 512))
+            cv2.imshow('image', frame)
 
-                # camera axes:
-                # y-axis heads downward
-                # x-axis heads right
-                # z-axis heads forward
-                # to sum up, camera axes follows NED format.
+            key = cv2.waitKey(25)
+            if (key & 0xFF == ord("c")):
+                is_calibrating = True
+                print("start calibrating,hold the aruco marker still")
 
-        frame = cv2.resize(frame, (1024, 512), interpolation=cv2.INTER_AREA)
-
-        for point in square_markers:
-            cv2.circle(frame, (point[0], point[1]), 1, (255, 0, 0), -1)
-        cv2.imshow('image', frame)
-        key = cv2.waitKey(25)
-        if (key & 0xFF == 8):  # this is backspace button
-            square_markers.pop(-1)
-        elif (key & 0xFF == ord("q")):
-            cv2.destroyAllWindows()
-            break
-        elif (key & 0xFF == ord("s")):
-            if len(square_markers) < 4:
-                print("cant save, not enough point")
-                continue
-            bev_tool = bev_transform_tools(
-                IMG_SHAPE, (distance_x * 100, distance_z * 100),
-                MARKER_LENGTH * 100)
-            ordered_tile_coords = order_point(square_markers)
-            print(ordered_tile_coords)
-            bev_tool.calculate_transform_matrix(ordered_tile_coords, yaw)
-            print(bev_tool.dero, bev_tool.detran, bev_tool.M)
-            bev_tool.create_occ_grid_param(10, 0.1)
-            bev_tool.save_to_JSON("calibration_data.json")
-            c = cv2.waitKey(1) % 0x100
-            if (c == 27):
+            elif (key & 0xFF == ord("q")):
+                cv2.destroyAllWindows()
                 break
+            elif (key & 0xFF == ord("s")):
+                bev_tool = bev_transform_tools(
+                    IMG_SHAPE, (distance_x * 100, distance_z * 100),
+                    MARKER_LENGTH * 100, 1)
+                square_angle = np.pi / 2
+                top_left_y = refined_corners[0, 1]
+                top_right_y = refined_corners[2, 1]
+                reverse = np.sign(top_right_y - top_left_y)
+                yaw = np.abs(yaw -
+                             int(yaw / square_angle) * square_angle) * reverse
+                print(np.degrees(yaw))
+                bev_tool.calculate_transform_matrix(refined_corners, yaw)
+                bev_tool.create_occ_grid_param(10, 0.1)
+                bev_tool.save_to_JSON("calibration_data.json")
+                mat = bev_tool._intrinsic_matrix
+                warped = cv2.warpPerspective(frame, mat, (1024, 512))
+                cv2.imshow("warped", warped)
+                # c = cv2.waitKey(1) % 0x100
+                # if (c == 27):
+                #     break
 
-finally:
-    pipeline.stop()
-    cv2.destroyAllWindows()
+
+#================================================
+
+    finally:
+        pipeline.stop()
+        cv2.destroyAllWindows()
+
+main()

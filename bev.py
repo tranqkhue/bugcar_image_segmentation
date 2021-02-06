@@ -3,66 +3,18 @@ import numpy as np
 from numpy import pi, cos, sin
 import json
 
-# When dealing with OpenCV functions
-# Numpy dimension order should be [height,width]
-# Not to be confused with [x,y] axis
-
-
-def setupBEVLongRange():
-    img_shape = (512, 1024)
-    # first number is x , second number is y
-    top_left_tile = np.array([489, 380])
-    bot_left_tile = np.array([483, 396])
-    top_right_tile = np.array([580, 380])
-    bot_right_tile = np.array([578, 396])
-    tile = np.stack(
-        (top_left_tile, bot_left_tile, top_right_tile, bot_right_tile), axis=0)
-    target = (0, 510)
-    tile_length = 60
-    perspective_transformer = bev_transform_tools(img_shape, target,
-                                                  tile_length)
-    matrix = perspective_transformer.calculate_transform_matrix(tile)
-    perspective_transformer.create_occ_grid_param()
-    print("cm per pixel", perspective_transformer.cm_per_px)
-    return perspective_transformer, matrix
-
-
-def setupBEVShortRange():
-    # there should be 2 bev parameter for each range, this is for distance from 3m
-    img_shape = (512, 1024)
-    # first number is x , second number is y
-    top_left_tile = np.array([441, 437])
-    bot_left_tile = np.array([437, 471])
-    top_right_tile = np.array([568, 437])
-    bot_right_tile = np.array([588, 471])
-    tile = np.stack(
-        (top_left_tile, bot_left_tile, top_right_tile, bot_right_tile), axis=0)
-    target = (0, 330)
-    tile_length = 60
-    perspective_transformer = bev_transform_tools(img_shape, target,
-                                                  tile_length)
-    matrix = perspective_transformer.calculate_transform_matrix(tile)
-    perspective_transformer.create_occ_grid_param()
-    print("cm per pixel", perspective_transformer.cm_per_px)
-    return perspective_transformer, matrix
-
-
-def setupBEV():
-    # bugs: setting long range bev will distort short range object.
-    # idea : setting different bev ratio for different distance?
-    return setupBEVShortRange()
-
 
 class bev_transform_tools:
 
     # dist2target : distance from camera to the target: denoted (x,y) (cm)
     # x is the horizontal distance
     # y is the vertical distance
-    def __init__(self, image_shape, dist2target, tile_length):
-        self.width = image_shape[1]
-        self.height = image_shape[0]
+    def __init__(self, image_shape, dist2target, tile_length, cm_per_px):
+        self.width = image_shape[0]
+        self.height = image_shape[1]
         self.dist2target = dist2target
         self.tile_length = tile_length  # in cm
+        self.cm_per_px = cm_per_px
 
     @classmethod
     def fromJSON(cls, filepath):
@@ -80,10 +32,8 @@ class bev_transform_tools:
         tile_length = data["tile_length"]
         occ_grid_size_in_m = data["occ_grid_size"]
         cell_size_in_m = data['cell_size_in_m']
-
-        bev = cls(shape, dist2target, tile_length)
-        bev.tile_length_pixel = data["tile_length_pixel"]
-        bev.cm_per_px = (bev.tile_length / bev.tile_length_pixel)
+        cm_per_px = data['cm_per_px']
+        bev = cls(shape, dist2target, tile_length, cm_per_px)
         bev._intrinsic_matrix = intrinsic_matrix
         bev.M = M
         bev.dero = dero_matrix
@@ -108,12 +58,12 @@ class bev_transform_tools:
             "intrinsic matrix": self._intrinsic_matrix.tolist(),
             "distance to target": self.dist2target,
             "tile_length": self.tile_length,
-            "tile_length_pixel": self.tile_length_pixel,
             "occ_grid_size": self.__occ_grid * self.__cell_size_in_m,
             "cell_size_in_m": self.__cell_size_in_m,
             "M": self.M.tolist(),
             "derotation": self.dero.tolist(),
             "detranslation": self.detran.tolist(),
+            "cm_per_px": self.cm_per_px
         }
         json.dump(data, f)
 
@@ -144,6 +94,7 @@ class bev_transform_tools:
         print(origin_after_derotation)
         trans_x = self.width / 2 - origin_after_derotation[0]
         trans_y = self.height - origin_after_derotation[1]
+        print(trans_x, trans_y)
         translation = np.array([[1, 0, trans_x], [0, 1, trans_y], [0, 0, 1]])
 
         self.detran = translation
@@ -165,14 +116,8 @@ class bev_transform_tools:
                              np.linalg.norm(bot_left_tile - bot_right_tile))
         max_height_tile = max(np.linalg.norm(top_left_tile - bot_left_tile),
                               np.linalg.norm(bot_right_tile - top_right_tile))
-        zoom_out_ratio = 3
 
-        # print(max_height_tile)
-        # int(max_height_tile/zoom_out_ratio) #max height should be 12
-        max_height = 12
-        self.tile_length_pixel = max_height
-        self.cm_per_px = self.tile_length / self.tile_length_pixel
-        # print(self.tile_length)
+        max_height = self.tile_length / self.cm_per_px
 
         dest = np.array([[0, 0], [0, max_height - 1], [max_height - 1, 0],
                          [max_height - 1, max_height - 1]],
