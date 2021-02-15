@@ -54,7 +54,7 @@ class bev_transform_tools:
         f = open(file_path, mode="w")
 
         data = {
-            "size": (self.height, self.width),
+            "size": (self.width, self.height),
             "intrinsic matrix": self._intrinsic_matrix.tolist(),
             "distance to target": self.dist2target,
             "tile_length": self.tile_length,
@@ -151,6 +151,7 @@ class bev_transform_tools:
         # all of these size are in pixels unit
         self.__cell_size = (self.__cell_size_in_m * 100 / self.cm_per_px)
         self.__occ_grid = int(occupancy_grid_size_in_m / self.__cell_size_in_m)
+        # this describe the length of the occupancy grid's edges in pixels
         self.__occ_edge_pixel = int(self.__occ_grid * self.__cell_size)
 
     # --------------------------------------------------------------------------------------
@@ -160,34 +161,67 @@ class bev_transform_tools:
         segmap = np.add(segmap, 1)
         warped_img = cv2.warpPerspective(segmap, self._intrinsic_matrix,
                                          (self.width, self.height))
-        x = int((self.width - self.__occ_edge_pixel) / 2)
-        y = self.height
-        warped_img = warped_img[y - self.__occ_edge_pixel:y,
-                                x:x + self.__occ_edge_pixel]
-        warped_width, warped_height = warped_img.shape
 
-        front_value = warped_img[
-            int(warped_height -
-                175 / self.cm_per_px):int(warped_height -
+        left_x = int((self.width - self.__occ_edge_pixel) / 2)
+        top_y = self.height - self.__occ_edge_pixel
+        warped_left_x = int(np.clip(left_x, 0, np.inf))
+        warped_img = warped_img[int(np.clip(top_y, 0, np.Inf)):self.height,
+                                warped_left_x:warped_left_x +
+                                self.__occ_edge_pixel]
+        cv2.imshow("warped", warped_img)
+        occ_grid_left_x = int(np.clip(-left_x, 0, np.inf))
+        print(occ_grid_left_x)
+        occ_grid_top_y = int(np.clip(-top_y, 0, np.inf))
+        print(occ_grid_top_y)
+
+        template_occ_grid = np.zeros(shape=(self.__occ_edge_pixel,
+                                            self.__occ_edge_pixel))
+        template_occ_grid[occ_grid_top_y:self.__occ_edge_pixel,
+                          occ_grid_left_x:occ_grid_left_x +
+                          self.__occ_edge_pixel] = warped_img
+        cv2.imshow("filling warped img in template occ grid",
+                   template_occ_grid)
+
+        occ_grid_size = template_occ_grid.shape[0]
+
+        image_bottom_vertices = np.transpose(
+            np.array([[self.width, self.height, 1], [0, self.height, 1]]))
+        vertices_after_transform = np.matmul(self._intrinsic_matrix,
+                                             image_bottom_vertices)
+
+        vertices_after_transform[:, 0] /= vertices_after_transform[2, 0]
+        vertices_after_transform[:, 1] /= vertices_after_transform[2, 1]
+        vertices_after_transform = vertices_after_transform[0:2, :]
+        vertices_after_transform[0] -= left_x
+        vertices_after_transform[1] -= top_y
+        vertices_after_transform_x_projection = np.copy(
+            vertices_after_transform)
+        vertices_after_transform_x_projection[1] = occ_grid_size
+        front_value = template_occ_grid[
+            int(occ_grid_size -
+                175 / self.cm_per_px):int(occ_grid_size -
                                           170 / self.cm_per_px),
-            int(warped_width / 2 -
-                100 / self.cm_per_px):int(warped_width / 2 +
+            int(occ_grid_size / 2 -
+                100 / self.cm_per_px):int(occ_grid_size / 2 +
                                           100 / self.cm_per_px)]
         front_value = np.mean(front_value)
         front_value = int(np.round(front_value))
-        warped_img = cv2.rectangle(
-            warped_img, (int(warped_width / 2 - 100 / self.cm_per_px),
-                         int(warped_height - 170 / self.cm_per_px)),
-            (int(warped_width / 2 + 100 / self.cm_per_px),
-             int(warped_height - 50 / self.cm_per_px)), front_value, -1)
-        #warped_img = cv2.rectangle(warped_img, (0,0),(100,100),1,-1)
-        #occupancy_grid = (np.ones((self.__occ_grid,self.__occ_grid))* -1).astype(np.int8)
-        #visible_version_grid = np.zeros((self.occ_gridY,self.occ_gridX,3))
-        occupancy_grid = cv2.resize(warped_img,
-                                    (self.__occ_grid, self.__occ_grid),
-                                    interpolation=cv2.INTER_NEAREST) * 100
+
+        unknown_area_poly = np.append(
+            vertices_after_transform,
+            np.flip(vertices_after_transform_x_projection, axis=1),
+            axis=1)
+        unknown_area_poly = np.transpose(unknown_area_poly)
+        unknown_area_poly = unknown_area_poly.astype(np.int32)
+        cv2.fillConvexPoly(template_occ_grid, unknown_area_poly, front_value)
+        cv2.imshow("occ grid after filling the base", template_occ_grid)
+        occupancy_grid = cv2.resize(
+            template_occ_grid,
+            (self.__occ_grid, self.__occ_grid),
+        ) * 100
+        cv2.imshow("asd", occupancy_grid)
         occupancy_grid = np.where(occupancy_grid == 0, -1,
-                                  200 - occupancy_grid)
+                                  occupancy_grid - 100)
         occupancy_grid = cv2.flip(occupancy_grid, 0)
         occupancy_grid = cv2.rotate(occupancy_grid,
                                     cv2.ROTATE_90_COUNTERCLOCKWISE)

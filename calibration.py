@@ -21,6 +21,7 @@ FPS = 15
 IMG_SHAPE = (1024, 512)
 resize_ratio = (IMG_SHAPE[0] / REALSENSE_RESOLUTION[0],
                 IMG_SHAPE[1] / REALSENSE_RESOLUTION[1])
+
 MARKER_LENGTH = 0.557
 
 
@@ -50,7 +51,7 @@ def calibrate_with_median(corners_list):
     for i in range(4):
         x = corners_list[:, i, 0]
         y = corners_list[:, i, 1]
-        refined_corners.append(np.array([np.median(x), np.median(y)]))
+        refined_corners.append(np.array([np.mean(x), np.mean(y)]))
         ax[i // 2, i % 2].hist2d(x, y)
     plt.show()
     plt.close(fig=fig)
@@ -199,7 +200,6 @@ def main():
             if (key & 0xFF == ord("c")):
                 is_calibrating = True
                 print("start calibrating,hold the aruco marker still")
-
             elif (key & 0xFF == ord("q")):
                 cv2.destroyAllWindows()
                 break
@@ -207,18 +207,25 @@ def main():
                 bev_tool = bev_transform_tools(
                     IMG_SHAPE, (distance_x * 100, distance_z * 100),
                     MARKER_LENGTH * 100, 1)
-                square_angle = np.pi / 2
-                top_left_y = refined_corners[0, 1]
-                top_right_y = refined_corners[2, 1]
-                reverse = np.sign(top_right_y - top_left_y)
-                yaw = np.abs(yaw -
-                             int(yaw / square_angle) * square_angle) * reverse
-                print(np.degrees(yaw))
+
+                # reverse = np.sign(top_right_y - top_left_y)
+                print("yaw is", yaw)
+                if yaw >= -np.pi / 4 and yaw < np.pi / 4:
+                    yaw = -yaw
+                elif yaw >= np.pi / 4 and yaw < 3 * np.pi / 4:
+                    yaw = np.pi / 2 - yaw
+                elif yaw >= 3 * np.pi / 4 and yaw < 5 * np.pi / 4:
+                    yaw = np.pi - yaw
+                else:
+                    yaw = 3 * np.pi / 2 - yaw
+                yaw = -yaw
+
                 bev_tool.calculate_transform_matrix(refined_corners, yaw)
                 bev_tool.create_occ_grid_param(10, 0.1)
                 bev_tool.save_to_JSON("calibration_data.json")
                 mat = bev_tool._intrinsic_matrix
-                warped = cv2.warpPerspective(frame, mat, (1024, 512))
+                warped = cv2.warpPerspective(frame, mat, (1024, 1024))
+                # cv2.imshow("only_M", warped_M)
                 cv2.imshow("warped", warped)
                 # c = cv2.waitKey(1) % 0x100
                 # if (c == 27):
