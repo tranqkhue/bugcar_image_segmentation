@@ -1,12 +1,9 @@
 import cv2
-import csv
-import rospy
 import numpy as np
-from fiducial_msgs.msg import FiducialTransformArray
 from bev import bev_transform_tools
 import matplotlib.pyplot as plt
-import asyncio
 import pyrealsense2 as rs
+from utils import order_points, clahe
 
 is_calibrating = False
 frame = []
@@ -23,24 +20,7 @@ resize_ratio = (IMG_SHAPE[0] / REALSENSE_RESOLUTION[0],
                 IMG_SHAPE[1] / REALSENSE_RESOLUTION[1])
 
 MARKER_LENGTH = 0.557
-
-
-def clahe(img):
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-
-    #-----Splitting the LAB image to different channels-------------------------
-    l, a, b = cv2.split(lab)
-
-    #-----Applying CLAHE to L-channel-------------------------------------------
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-    cl = clahe.apply(l)
-
-    #-----Merge the CLAHE enhanced L-channel with the a and b channel-----------
-    limg = cv2.merge((cl, a, b))
-
-    #-----Converting image from LAB Color model to RGB model--------------------
-    final = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
-    return final
+CM_PER_PX = 2
 
 
 def calibrate_with_median(corners_list):
@@ -57,28 +37,6 @@ def calibrate_with_median(corners_list):
     plt.close(fig=fig)
     refined_corners = order_points(refined_corners)
     print(refined_corners)
-
-
-def order_points(points):
-    sort_by_height = lambda e: e[1]
-    points.sort(key=sort_by_height)
-    top_points = points[:2]
-    bot_points = points[2:]
-    if top_points[0][0] > top_points[1][0]:
-        top_left_point = top_points[1]
-        top_right_point = top_points[0]
-    else:
-        top_left_point = top_points[0]
-        top_right_point = top_points[1]
-    if bot_points[0][0] > bot_points[1][0]:
-        bot_left_point = bot_points[1]
-        bot_right_point = bot_points[0]
-    else:
-        bot_left_point = bot_points[0]
-        bot_right_point = bot_points[1]
-
-    return np.array(
-        [top_left_point, bot_left_point, top_right_point, bot_right_point])
 
 
 def find_distance_from_fiducial_to_camera_in_bev_frame(tvec, yaw_cam2fid,
@@ -218,7 +176,7 @@ def main():
 
             # special keys to interact with the program
             #================================================
-            frame = cv2.resize(frame, (1024, 512))
+            frame = cv2.resize(frame, IMG_SHAPE)
             cv2.imshow('image', frame)
 
             key = cv2.waitKey(25)
@@ -229,9 +187,6 @@ def main():
                 cv2.destroyAllWindows()
                 break
             elif (key & 0xFF == ord("s")):
-                bev_tool = bev_transform_tools(
-                    IMG_SHAPE, (distance_x * 100, distance_y * 100),
-                    MARKER_LENGTH * 100, 1)
 
                 # reverse = np.sign(top_right_y - top_left_y)
                 print("yaw is", yaw_cam2fid)
@@ -243,14 +198,16 @@ def main():
                     yaw_cam2fid = np.pi - yaw_cam2fid
                 else:
                     yaw_cam2fid = 3 * np.pi / 2 - yaw_cam2fid
-                yaw_cam2fid = -yaw_cam2fid
-
-                bev_tool.calculate_transform_matrix(refined_corners,
-                                                    yaw_cam2fid)
+                print("yaw is", yaw_cam2fid)
+                # yaw_cam2fid = -yaw_cam2fid
+                bev_tool = bev_transform_tools(
+                    IMG_SHAPE, (distance_x * 100, distance_y * 100),
+                    MARKER_LENGTH * 100, CM_PER_PX, yaw_cam2fid)
+                bev_tool.calculate_transform_matrix(refined_corners)
                 bev_tool.create_occ_grid_param(10, 0.1)
                 bev_tool.save_to_JSON("calibration_data.json")
                 mat = bev_tool._intrinsic_matrix
-                warped = cv2.warpPerspective(frame, mat, (1024, 512))
+                warped = cv2.warpPerspective(frame, mat, IMG_SHAPE)
                 # cv2.imshow("only_M", warped_M)
                 cv2.imshow("warped", warped)
                 # c = cv2.waitKey(1) % 0x100

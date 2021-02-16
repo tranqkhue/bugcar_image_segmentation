@@ -1,5 +1,4 @@
 from bev import bev_transform_tools
-import tensorflow as tf
 import numpy as np
 import time
 import cv2
@@ -21,16 +20,13 @@ def test_bev():
             # frame = cv2.rotate(frame, cv2.cv2.ROTATE_180)
             # frame = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
             cv2.imshow('raw', frame)
-            derotation = transformer.dero
-            detranslation = transformer.detran
-            M = transformer.M
-            matrix = np.matmul(derotation, M)
-            matrix = np.matmul(detranslation, matrix)
+            matrix = transformer._intrinsic_matrix
             warped_image = cv2.warpPerspective(frame, matrix, (1024, 512))
-            m_only = cv2.warpPerspective(frame, M, (1024, 512))
             cv2.imshow('warped', warped_image)
-            cv2.imshow("only M", m_only)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             cap.release()
             cv2.destroyAllWindows()
             break
+
+
+test_bev()

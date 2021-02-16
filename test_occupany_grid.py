@@ -1,6 +1,6 @@
-from bev import bev_transform_tools
+from bev import bev_transform_tools_legacy
 import numpy as np
-transformer = bev_transform_tools.fromJSON('calibration_data.json')
+transformer = bev_transform_tools_legacy.fromJSON('calibration_data.json')
 import pytest
 import cv2
 
