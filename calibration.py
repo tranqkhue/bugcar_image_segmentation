@@ -81,6 +81,25 @@ def order_points(points):
         [top_left_point, bot_left_point, top_right_point, bot_right_point])
 
 
+def find_distance_from_fiducial_to_camera_in_bev_frame(tvec, yaw_cam2fid,
+                                                       rot_mat_cam2fid):
+    yaw_mat_cam2fid = np.array(
+        [[np.cos(yaw_cam2fid), -np.sin(yaw_cam2fid), 0],
+         [np.sin(yaw_cam2fid), np.cos(yaw_cam2fid), 0],\
+         [0, 0, 1]])
+    yaw_mat_fid2bev = np.linalg.inv(yaw_mat_cam2fid)
+    rot_mat_cam2bev = np.matmul(yaw_mat_fid2bev, rot_mat_cam2fid)
+    tvec_bev_frame = np.matmul(rot_mat_cam2bev, tvec)
+    # print(tvec_fiducial_frame)
+    # there are 3 kind of distances with respect to 3 axes x,y,z:
+    # z is how far you are from the target
+    # x is how left you are from the target. >0 means your camera is to the left of the target
+    # y is how low your are from the target. >0 means that the target is above the baseline of your camera
+    distance_x = tvec_bev_frame[0]
+    distance_y = tvec_bev_frame[1]
+    return distance_x, distance_y
+
+
 def main():
     global is_calibrating
     pipeline = rs.pipeline()
@@ -157,13 +176,12 @@ def main():
                 # Sometimes, there will be 2 possible rotation vectors for 1 marker.
                 # It is not clear as to what is causing this behaviour, further research needed!
                 for rotation in rvec:
-                    rotation_matrix_cam_ref, _ = cv2.Rodrigues(rotation)
-                    rotation_matrix_fiducial_ref = np.linalg.inv(
-                        rotation_matrix_cam_ref)
+                    rotation_mat_fid2cam, _ = cv2.Rodrigues(rotation)
+                    rotation_mat_cam2fid = np.linalg.inv(rotation_mat_fid2cam)
                     # the formula can be found here
                     #http://planning.cs.uiuc.edu/node102.html#eqn:yprmat
-                    yaw = np.arctan2(rotation_matrix_fiducial_ref[1, 0],
-                                     rotation_matrix_fiducial_ref[0, 0])
+                    yaw_cam2fid = np.arctan2(rotation_mat_cam2fid[1, 0],
+                                             rotation_mat_cam2fid[0, 0])
 
                     cv2.aruco.drawAxis(frame, K, distortion_coeffs, rotation,
                                        np.array(tvec)[0][0], 0.1)
@@ -181,30 +199,20 @@ def main():
             #================================================
 
             #processing translation vector information
-            # translation vector represent the position of camera relative to the fiducial marker, more info below
+            # translation vector represent the position of fiducial relative to the camera frame, more info below
             #================================================
             if tvec is not None:
                 tvec = np.array(tvec)[0][0]
                 # print("tvec raw", tvec)
                 # print(yaw)
-                yaw_matrix_fiducial_ref = np.array(
-                    [[np.cos(yaw), -np.sin(yaw), 0],
-                     [np.sin(yaw), np.cos(yaw), 0],\
-                     [0, 0, 1]])
-                yaw_matrix_bev_ref = np.linalg.inv(yaw_matrix_fiducial_ref)
-                rotation_matrix_fiducial_ref_yaw_compensated = np.matmul(
-                    yaw_matrix_bev_ref, rotation_matrix_fiducial_ref)
-                tvec_fiducial_frame = np.matmul(
-                    rotation_matrix_fiducial_ref_yaw_compensated, tvec)
+                distance_x, distance_y = find_distance_from_fiducial_to_camera_in_bev_frame(
+                    tvec, yaw_cam2fid, rotation_mat_cam2fid)
 
                 # print(tvec_fiducial_frame)
                 # there are 3 kind of distances with respect to 3 axes x,y,z:
                 # z is how far you are from the target
                 # x is how left you are from the target. >0 means your camera is to the left of the target
                 # y is how low your are from the target. >0 means that the target is above the baseline of your camera
-
-                distance_x = tvec_fiducial_frame[0]
-                distance_y = tvec_fiducial_frame[1]
                 # https://answers.opencv.org/question/197197/what-does-rvec-and-tvec-of-aruco-markers-correspond-to/
             #================================================
 
@@ -226,18 +234,19 @@ def main():
                     MARKER_LENGTH * 100, 1)
 
                 # reverse = np.sign(top_right_y - top_left_y)
-                print("yaw is", yaw)
-                if yaw >= -np.pi / 4 and yaw < np.pi / 4:
-                    yaw = -yaw
-                elif yaw >= np.pi / 4 and yaw < 3 * np.pi / 4:
-                    yaw = np.pi / 2 - yaw
-                elif yaw >= 3 * np.pi / 4 and yaw < 5 * np.pi / 4:
-                    yaw = np.pi - yaw
+                print("yaw is", yaw_cam2fid)
+                if yaw_cam2fid >= -np.pi / 4 and yaw_cam2fid < np.pi / 4:
+                    yaw_cam2fid = -yaw_cam2fid
+                elif yaw_cam2fid >= np.pi / 4 and yaw_cam2fid < 3 * np.pi / 4:
+                    yaw_cam2fid = np.pi / 2 - yaw_cam2fid
+                elif yaw_cam2fid >= 3 * np.pi / 4 and yaw_cam2fid < 5 * np.pi / 4:
+                    yaw_cam2fid = np.pi - yaw_cam2fid
                 else:
-                    yaw = 3 * np.pi / 2 - yaw
-                yaw = -yaw
+                    yaw_cam2fid = 3 * np.pi / 2 - yaw_cam2fid
+                yaw_cam2fid = -yaw_cam2fid
 
-                bev_tool.calculate_transform_matrix(refined_corners, yaw)
+                bev_tool.calculate_transform_matrix(refined_corners,
+                                                    yaw_cam2fid)
                 bev_tool.create_occ_grid_param(10, 0.1)
                 bev_tool.save_to_JSON("calibration_data.json")
                 mat = bev_tool._intrinsic_matrix
