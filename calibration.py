@@ -147,37 +147,26 @@ def main():
                         calibrate_with_median(ordered_corners_list)
             #================================================
 
-            #processing translation vector information
-            # translation vector represent the position of camera relative to the fiducial marker, more info below
-            #================================================
-            tvec = result[1]
-            if tvec is not None:
-                tvec = np.array(tvec)[0][0]
-                # there are 3 kind of distances with respect to 3 axes x,y,z:
-                # z is how far you are from the target
-                # x is how left you are from the target. >0 means your camera is to the left of the target
-                # y is how low your are from the target. >0 means that the target is above the baseline of your camera
-                distance_z = tvec[2]
-                distance_x = tvec[0]
-                distance_y = tvec[1]
-            #================================================
-
             # Find the yaw of camera with respect to the aruco's coordinate frame
             #================================================
             rvec = result[0]
+            tvec = result[1]
             if rvec is not None:
 
                 # rvec is the orientation of the camera relative to the aruco marker.
                 # Sometimes, there will be 2 possible rotation vectors for 1 marker.
                 # It is not clear as to what is causing this behaviour, further research needed!
                 for rotation in rvec:
-                    rotation_matrix, _ = cv2.Rodrigues(rotation)
-                    rotation_matrix = np.linalg.inv(rotation_matrix)
-                    yaw = np.arctan2(rotation_matrix[1, 0], rotation_matrix[0,
-                                                                            0])
+                    rotation_matrix_cam_ref, _ = cv2.Rodrigues(rotation)
+                    rotation_matrix_fiducial_ref = np.linalg.inv(
+                        rotation_matrix_cam_ref)
+                    # the formula can be found here
+                    #http://planning.cs.uiuc.edu/node102.html#eqn:yprmat
+                    yaw = np.arctan2(rotation_matrix_fiducial_ref[1, 0],
+                                     rotation_matrix_fiducial_ref[0, 0])
 
                     cv2.aruco.drawAxis(frame, K, distortion_coeffs, rotation,
-                                       tvec, 0.1)
+                                       np.array(tvec)[0][0], 0.1)
                     # aruco:
                     # blue  represent z axis
                     # red represent x axis
@@ -189,6 +178,34 @@ def main():
                     # z-axis heads forward
                     # to sum up, camera axes follows NED format.
 
+            #================================================
+
+            #processing translation vector information
+            # translation vector represent the position of camera relative to the fiducial marker, more info below
+            #================================================
+            if tvec is not None:
+                tvec = np.array(tvec)[0][0]
+                # print("tvec raw", tvec)
+                # print(yaw)
+                yaw_matrix_fiducial_ref = np.array(
+                    [[np.cos(yaw), -np.sin(yaw), 0],
+                     [np.sin(yaw), np.cos(yaw), 0],\
+                     [0, 0, 1]])
+                yaw_matrix_bev_ref = np.linalg.inv(yaw_matrix_fiducial_ref)
+                rotation_matrix_fiducial_ref_yaw_compensated = np.matmul(
+                    yaw_matrix_bev_ref, rotation_matrix_fiducial_ref)
+                tvec_fiducial_frame = np.matmul(
+                    rotation_matrix_fiducial_ref_yaw_compensated, tvec)
+
+                # print(tvec_fiducial_frame)
+                # there are 3 kind of distances with respect to 3 axes x,y,z:
+                # z is how far you are from the target
+                # x is how left you are from the target. >0 means your camera is to the left of the target
+                # y is how low your are from the target. >0 means that the target is above the baseline of your camera
+
+                distance_x = tvec_fiducial_frame[0]
+                distance_y = tvec_fiducial_frame[1]
+                # https://answers.opencv.org/question/197197/what-does-rvec-and-tvec-of-aruco-markers-correspond-to/
             #================================================
 
             # special keys to interact with the program
@@ -205,7 +222,7 @@ def main():
                 break
             elif (key & 0xFF == ord("s")):
                 bev_tool = bev_transform_tools(
-                    IMG_SHAPE, (distance_x * 100, distance_z * 100),
+                    IMG_SHAPE, (distance_x * 100, distance_y * 100),
                     MARKER_LENGTH * 100, 1)
 
                 # reverse = np.sign(top_right_y - top_left_y)
@@ -224,7 +241,7 @@ def main():
                 bev_tool.create_occ_grid_param(10, 0.1)
                 bev_tool.save_to_JSON("calibration_data.json")
                 mat = bev_tool._intrinsic_matrix
-                warped = cv2.warpPerspective(frame, mat, (1024, 1024))
+                warped = cv2.warpPerspective(frame, mat, (1024, 512))
                 # cv2.imshow("only_M", warped_M)
                 cv2.imshow("warped", warped)
                 # c = cv2.waitKey(1) % 0x100

@@ -80,7 +80,7 @@ def contour_noise_removal(segmap):
             main_road_cnts.append(cnt)
 
     contour_noise_removed = np.zeros(segmap.shape).astype(np.uint8)
-    cv2.fillPoly(contour_noise_removed, main_road_cnts, 255)
+    cv2.fillPoly(contour_noise_removed, main_road_cnts, 1)
 
     return contour_noise_removed
 
@@ -125,31 +125,28 @@ while True:
         # Remove road branches (or noise) that are not connected to main branches
         # Main road branches go from the bottom part of the RGB map
         # (should be) right front of the vehicle
-        conour_noise_removed = contour_noise_removal(segmap)
-
+        contour_noise_removed = contour_noise_removal(segmap)
         # Visualize the segmap by masking the RGB frame
-        (out_height, out_width) = conour_noise_removed.shape
-        resized_frame = cv2.resize(frame, (out_width, out_height))
-        segmap_viz    = cv2.bitwise_and(resized_frame, resized_frame, \
-                mask=conour_noise_removed)
-        enlarged_viz = cv2.resize(segmap_viz, (0, 0), fx=3, fy=3)
-        cv2.imshow('segmap_cnt_noise_removal', cv2.cvtColor(enlarged_viz, \
-                     cv2.COLOR_RGB2BGR))
+        # (out_height, out_width) = contour_noise_removed.shape
+        # resized_frame = cv2.resize(frame, (out_width, out_height))
+        # segmap_viz    = cv2.bitwise_and(resized_frame, resized_frame, \
+        #         mask=contour_noise_removed)
+        # enlarged_viz = cv2.resize(segmap_viz, (0, 0), fx=3, fy=3)
+        # cv2.imshow('segmap_cnt_noise_removal', cv2.cvtColor(enlarged_viz, \
+        #              cv2.COLOR_RGB2BGR))
 
         # Visualize the BEV by masking and warp the RGB frame
         # Resize the segmap to scale with the calibration matrix
-        resized_segmap_viz = cv2.resize(segmap_viz, (1024, 512))
-        warped_perspective_viz = cv2.warpPerspective(resized_segmap_viz, \
-                    matrix,(1024,512))
-        cv2.imshow('wapred_perspective', cv2.cvtColor(warped_perspective_viz, \
-                     cv2.COLOR_RGB2BGR))
+        # resized_segmap_viz = cv2.resize(segmap_viz, (1024, 512))
+        # warped_perspective_viz = cv2.warpPerspective(resized_segmap_viz, \
+        #             matrix,(1024,512))
+        # cv2.imshow('warped_perspective', cv2.cvtColor(warped_perspective_viz, \
+        #              cv2.COLOR_RGB2BGR))
 
         # Publish to Occupancy Grid
         # Need to resize to be the same with the image size in calibration process
-        print(np.histogram(conour_noise_removed))
-        cv2.
-        resized_segmap = cv2.resize(conour_noise_removed, (1024, 512))
-        # print(np.histogram(resized_segmap))
+        # print(np.histogram(contour_noise_removed))
+        resized_segmap = cv2.resize(contour_noise_removed, (1024, 512))
         occ_grid = perspective_transformer.create_occupancy_grid(
             resized_segmap)
         msg    = occgrid_to_ros.og_msg(occ_grid,\
@@ -160,7 +157,7 @@ while True:
     print('Inference FPS:  ',  format(inference_fps, '.2f'), ' | ',\
        'Total loop FPS:  ', format(1/(time.time()-t0), '.2f'))
 
-    if (cv2.waitKey(25) & 0xFF == ord('q')) | (ret == False):
+    if (cv2.waitKey(1) & 0xFF == ord('q')) | (ret == False):
         cap.release()
         cv2.destroyAllWindows()
         break
