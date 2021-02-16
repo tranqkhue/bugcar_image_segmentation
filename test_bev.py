@@ -6,7 +6,7 @@ import cv2
 
 def test_bev():
     transformer = bev_transform_tools.fromJSON("calibration_data.json")
-    matrix = transformer._intrinsic_matrix
+    matrix = transformer._bev_matrix
     cap = cv2.VideoCapture(6)
     assert cap.isOpened()
     cap.set(3, 1280)
@@ -20,7 +20,7 @@ def test_bev():
             # frame = cv2.rotate(frame, cv2.cv2.ROTATE_180)
             # frame = cv2.cvtColor(frame,cv2.COLOR_BGR2RGB)
             cv2.imshow('raw', frame)
-            matrix = transformer._intrinsic_matrix
+            matrix = transformer._bev_matrix
             warped_image = cv2.warpPerspective(frame, matrix, (1024, 512))
             cv2.imshow('warped', warped_image)
         if cv2.waitKey(1) & 0xFF == ord('q'):

@@ -34,7 +34,7 @@ class bev_transform_tools_legacy:
         cell_size_in_m = data['cell_size_in_m']
         cm_per_px = data['cm_per_px']
         bev = cls(shape, dist2target, tile_length, cm_per_px)
-        bev._intrinsic_matrix = intrinsic_matrix
+        bev._bev_matrix = intrinsic_matrix
         bev.M = M
         bev.dero = dero_matrix
         bev.detran = detrans
@@ -55,7 +55,7 @@ class bev_transform_tools_legacy:
 
         data = {
             "size": (self.width, self.height),
-            "intrinsic matrix": self._intrinsic_matrix.tolist(),
+            "intrinsic matrix": self._bev_matrix.tolist(),
             "distance to target": self.dist2target,
             "tile_length": self.tile_length,
             "occ_grid_size": self.__occ_grid * self.__cell_size_in_m,
@@ -137,8 +137,8 @@ class bev_transform_tools_legacy:
         # Multiply 3 matrix together in backward order: M rotation translation
         rot_trans = np.matmul(translation, rotation)
 
-        self._intrinsic_matrix = np.matmul(rot_trans, M)
-        return self._intrinsic_matrix
+        self._bev_matrix = np.matmul(rot_trans, M)
+        return self._bev_matrix
 
     # --------------------------------------------------------------------------------------
 
@@ -159,7 +159,7 @@ class bev_transform_tools_legacy:
     def create_occupancy_grid(self, segmap):
         # segmap must have the same size
         segmap = np.add(segmap, 1)
-        warped_img = cv2.warpPerspective(segmap, self._intrinsic_matrix,
+        warped_img = cv2.warpPerspective(segmap, self._bev_matrix,
                                          (self.width, self.height))
         left_x = int((self.width - self.__occ_edge_pixel) / 2)
         top_y = self.height - self.__occ_edge_pixel
@@ -183,7 +183,7 @@ class bev_transform_tools_legacy:
 
         image_bottom_vertices = np.transpose(
             np.array([[self.width, self.height, 1], [0, self.height, 1]]))
-        vertices_after_transform = np.matmul(self._intrinsic_matrix,
+        vertices_after_transform = np.matmul(self._bev_matrix,
                                              image_bottom_vertices)
 
         vertices_after_transform[:, 0] /= vertices_after_transform[2, 0]
@@ -256,7 +256,7 @@ class bev_transform_tools:
         cm_per_px = data['cm_per_px']
         yaw = data['yaw']
         bev = cls(shape, dist2target, tile_length, cm_per_px, yaw)
-        bev._intrinsic_matrix = intrinsic_matrix
+        bev._bev_matrix = intrinsic_matrix
         bev.create_occ_grid_param(occ_grid_size_in_m, cell_size_in_m)
         return bev
 
@@ -274,7 +274,7 @@ class bev_transform_tools:
 
         data = {
             "size": (self.width, self.height),
-            "intrinsic matrix": self._intrinsic_matrix.tolist(),
+            "intrinsic matrix": self._bev_matrix.tolist(),
             "distance to target": self.dist2target,
             "tile_length": self.tile_length,
             "occ_grid_size": self.__occ_grid * self.__cell_size_in_m,
@@ -313,8 +313,8 @@ class bev_transform_tools:
 
         M = cv2.getPerspectiveTransform(tile_coords.astype(np.float32), dest)
 
-        self._intrinsic_matrix = M
-        return self._intrinsic_matrix
+        self._bev_matrix = M
+        return self._bev_matrix
 
     # --------------------------------------------------------------------------------------
 
@@ -335,7 +335,7 @@ class bev_transform_tools:
     def create_occupancy_grid(self, segmap):
         # segmap must have the same size
         segmap = np.add(segmap, 1)
-        warped_img = cv2.warpPerspective(segmap, self._intrinsic_matrix,
+        warped_img = cv2.warpPerspective(segmap, self._bev_matrix,
                                          (self.width, self.height))
         left_x = int((self.width - self.__occ_edge_pixel) / 2)
         top_y = self.height - self.__occ_edge_pixel
@@ -359,7 +359,7 @@ class bev_transform_tools:
 
         image_bottom_vertices = np.transpose(
             np.array([[self.width, self.height, 1], [0, self.height, 1]]))
-        vertices_after_transform = np.matmul(self._intrinsic_matrix,
+        vertices_after_transform = np.matmul(self._bev_matrix,
                                              image_bottom_vertices)
 
         vertices_after_transform[:, 0] /= vertices_after_transform[2, 0]

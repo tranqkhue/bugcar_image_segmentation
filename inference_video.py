@@ -99,7 +99,7 @@ if gpus:
         print(e)
 model = tf.keras.models.load_model('model.hdf5')
 perspective_transformer = bev_transform_tools.fromJSON('calibration_data.json')
-matrix = perspective_transformer._intrinsic_matrix
+matrix = perspective_transformer._bev_matrix
 #print("Check model input:  ",model.inputs)
 cap = cv2.VideoCapture('../data/test.webm')
 cap.set(3, 1280)

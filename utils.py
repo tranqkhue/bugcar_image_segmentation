@@ -3,6 +3,7 @@ import cv2
 
 
 def order_points(points):
+    points = points.tolist()
     sort_by_height = lambda e: e[1]
     points.sort(key=sort_by_height)
     top_points = points[:2]

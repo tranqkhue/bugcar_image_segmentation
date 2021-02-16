@@ -8,18 +8,18 @@ from utils import order_points, clahe
 is_calibrating = False
 frame = []
 ordered_corners_list = []
-refined_corners = []
+refined_corners = np.zeros(shape=(4, 2))
 distance_z = -1
 distance_x = -1
 aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
 aruco_params = cv2.aruco.DetectorParameters_create()
 REALSENSE_RESOLUTION = (1280, 720)
 FPS = 15
-IMG_SHAPE = (1024, 512)
+IMG_SHAPE = (1280, 720)
 resize_ratio = (IMG_SHAPE[0] / REALSENSE_RESOLUTION[0],
                 IMG_SHAPE[1] / REALSENSE_RESOLUTION[1])
 
-MARKER_LENGTH = 0.557
+MARKER_LENGTH = 0.268
 CM_PER_PX = 2
 
 
@@ -31,7 +31,7 @@ def calibrate_with_median(corners_list):
     for i in range(4):
         x = corners_list[:, i, 0]
         y = corners_list[:, i, 1]
-        refined_corners.append(np.array([np.mean(x), np.mean(y)]))
+        refined_corners[i] = np.array([np.mean(x), np.mean(y)])
         ax[i // 2, i % 2].hist2d(x, y)
     plt.show()
     plt.close(fig=fig)
@@ -39,13 +39,16 @@ def calibrate_with_median(corners_list):
     print(refined_corners)
 
 
-def find_distance_from_fiducial_to_camera_in_bev_frame(tvec, yaw_cam2fid,
+def find_distance_from_fiducial_to_camera_in_bev_frame(tvec, yaw_bev2fid,
                                                        rot_mat_cam2fid):
-    yaw_mat_cam2fid = np.array(
-        [[np.cos(yaw_cam2fid), -np.sin(yaw_cam2fid), 0],
-         [np.sin(yaw_cam2fid), np.cos(yaw_cam2fid), 0],\
+    # yaw_mat_cam2fid or yaw_mat_bev2fid, they are all the same, since only yaw is taken into account
+    # and bev frame really doesn't have any kind of rotation beside yaw.
+    # however , the ROTATION matrix of cam2fid and bev2fid are not identical.
+    yaw_mat_bev2fid = np.array(
+        [[np.cos(yaw_bev2fid), -np.sin(yaw_bev2fid), 0],
+         [np.sin(yaw_bev2fid), np.cos(yaw_bev2fid), 0],\
          [0, 0, 1]])
-    yaw_mat_fid2bev = np.linalg.inv(yaw_mat_cam2fid)
+    yaw_mat_fid2bev = np.linalg.inv(yaw_mat_bev2fid)
     rot_mat_cam2bev = np.matmul(yaw_mat_fid2bev, rot_mat_cam2fid)
     tvec_bev_frame = np.matmul(rot_mat_cam2bev, tvec)
     # print(tvec_fiducial_frame)
@@ -71,8 +74,6 @@ def main():
             #================================================
             pipeline_frames = pipeline.wait_for_frames()
             pipeline_rgb_frame = pipeline_frames.get_color_frame()
-            rgb_intrin = pipeline_rgb_frame.profile.as_video_stream_profile(
-            ).intrinsics
 
             frame = np.asanyarray(pipeline_rgb_frame.get_data())
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -118,7 +119,7 @@ def main():
                     if len(ordered_corners_list) < 100:
                         # these are the point before being resized
                         resized_corner = np.round(resize_ratio * corners[0][0])
-                        ordered_points = order_points(resized_corner.tolist())
+                        ordered_points = order_points(resized_corner)
                         ordered_corners_list.append(ordered_points)
                     else:
                         calibrate_with_median(ordered_corners_list)
@@ -188,7 +189,6 @@ def main():
                 break
             elif (key & 0xFF == ord("s")):
 
-                # reverse = np.sign(top_right_y - top_left_y)
                 print("yaw is", yaw_cam2fid)
                 if yaw_cam2fid >= -np.pi / 4 and yaw_cam2fid < np.pi / 4:
                     yaw_cam2fid = -yaw_cam2fid
@@ -199,20 +199,15 @@ def main():
                 else:
                     yaw_cam2fid = 3 * np.pi / 2 - yaw_cam2fid
                 print("yaw is", yaw_cam2fid)
-                # yaw_cam2fid = -yaw_cam2fid
                 bev_tool = bev_transform_tools(
                     IMG_SHAPE, (distance_x * 100, distance_y * 100),
                     MARKER_LENGTH * 100, CM_PER_PX, yaw_cam2fid)
                 bev_tool.calculate_transform_matrix(refined_corners)
                 bev_tool.create_occ_grid_param(10, 0.1)
                 bev_tool.save_to_JSON("calibration_data.json")
-                mat = bev_tool._intrinsic_matrix
+                mat = bev_tool._bev_matrix
                 warped = cv2.warpPerspective(frame, mat, IMG_SHAPE)
-                # cv2.imshow("only_M", warped_M)
                 cv2.imshow("warped", warped)
-                # c = cv2.waitKey(1) % 0x100
-                # if (c == 27):
-                #     break
 
 
 #================================================
