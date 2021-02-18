@@ -146,9 +146,13 @@ while True:
         # Publish to Occupancy Grid
         # Need to resize to be the same with the image size in calibration process
         # print(np.histogram(contour_noise_removed))
-        resized_segmap = cv2.resize(contour_noise_removed, (1024, 512))
+        resized_segmap = cv2.resize(contour_noise_removed, (1280, 720))
         occ_grid = perspective_transformer.create_occupancy_grid(
-            resized_segmap)
+            resized_segmap, perspective_transformer._bev_matrix,
+            perspective_transformer.width, perspective_transformer.height,
+            perspective_transformer.map_size,
+            perspective_transformer.map_resolution,
+            perspective_transformer.cm_per_px)
         msg    = occgrid_to_ros.og_msg(occ_grid,\
                  perspective_transformer.map_resolution,\
                  perspective_transformer.map_size)

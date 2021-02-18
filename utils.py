@@ -2,27 +2,41 @@ import numpy as np
 import cv2
 
 
-def order_points(points):
-    points = points.tolist()
-    sort_by_height = lambda e: e[1]
-    points.sort(key=sort_by_height)
-    top_points = points[:2]
-    bot_points = points[2:]
-    if top_points[0][0] > top_points[1][0]:
-        top_left_point = top_points[1]
-        top_right_point = top_points[0]
-    else:
-        top_left_point = top_points[0]
-        top_right_point = top_points[1]
-    if bot_points[0][0] > bot_points[1][0]:
-        bot_left_point = bot_points[1]
-        bot_right_point = bot_points[0]
-    else:
-        bot_left_point = bot_points[0]
-        bot_right_point = bot_points[1]
-
-    return np.array(
-        [top_left_point, bot_left_point, top_right_point, bot_right_point])
+def order_points(points, x_axis):
+    #axis is a 2x2 array containing 2 coordinates,1st one for the center and 2nd for a point on the chosen axis
+    print(x_axis)
+    center = x_axis[0]
+    translated_points = points - center
+    x_axis -= center
+    # this is the rotation from the axis to the x axis in the img
+    rotation = -np.arctan2(x_axis[1, 1], x_axis[1, 0])
+    rot_mat = np.array([[np.cos(rotation), -np.sin(rotation)],
+                        [np.sin(rotation), np.cos(rotation)]])
+    rotated_points = np.transpose(
+        np.matmul(rot_mat, np.transpose(translated_points)))
+    #the idea here is , we rotate the x_axis in fiducial to match the x_axis in camera, which will give us a rot matrix
+    # apply that rot matrix to 4 corners of fiducial.
+    # and we'll check if each points has pos or neg y_coordinate
+    # if pos: the point is on the left side of the x_axis,
+    # if neg: the point is on the right side of the x_axis
+    # after that, sort each of the left and right array by x_coordinate.
+    axis_left_side = []
+    axis_right_side = []
+    sort_by_x = lambda x: x["point"][0]
+    order_point = []
+    for i, point in enumerate(rotated_points):
+        if point[1] < 0:
+            axis_right_side.append({"order": i, "point": point})
+        else:
+            axis_left_side.append({"order": i, "point": point})
+    axis_left_side.sort(key=sort_by_x)
+    axis_right_side.sort(key=sort_by_x)
+    for point in axis_left_side:
+        order_point.append(point["order"])
+    for point in axis_right_side:
+        order_point.append(point["order"])
+    sorted_points = points[order_point]
+    return sorted_points
 
 
 def clahe(img):
