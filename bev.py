@@ -65,8 +65,6 @@ class bev_transform_tools:
 
     def calculate_transform_matrix(self, tile_coords, dist2target, cm_per_px,
                                    width, height, tile_length, yaw):
-
-        # Find the longest edge of the tile quadrilateral
         dist2target_px = (dist2target[0] / cm_per_px,
                           dist2target[1] / cm_per_px)
         target_in_img = (width / 2 + dist2target_px[0],
@@ -119,6 +117,8 @@ class bev_transform_tools:
                               occupancy_grid_size_in_m, cell_size_in_m,
                               cm_per_px):
         # segmap must have the same size
+        seg_width = segmap.shape[1]
+        seg_height = segmap.shape[0]
         cell_size = (cell_size_in_m * 100 / cm_per_px)
         occ_grid = int(occupancy_grid_size_in_m / cell_size_in_m)
         occ_edge_pixel = int(occ_grid * cell_size)
@@ -129,21 +129,18 @@ class bev_transform_tools:
         warped_left_x = int(np.clip(left_x, 0, np.inf))
         warped_img = warped_img[int(np.clip(top_y, 0, np.Inf)):height,
                                 warped_left_x:warped_left_x + occ_edge_pixel]
-
         occ_grid_left_x = int(np.clip(-left_x, 0, np.inf))
         occ_grid_top_y = int(np.clip(-top_y, 0, np.inf))
-
         template_occ_grid = np.zeros(shape=(occ_edge_pixel, occ_edge_pixel))
 
         template_occ_grid[occ_grid_top_y:occ_edge_pixel,
                           occ_grid_left_x:occ_grid_left_x +
-                          occ_edge_pixel] = warped_img
+                          warped_img.shape[1]] = warped_img
         template_occ_grid = template_occ_grid.astype(np.uint8)
-
         occ_grid_size = template_occ_grid.shape[0]
 
         image_bottom_vertices = np.transpose(
-            np.array([[width, height, 1], [0, height, 1]]))
+            np.array([[seg_width, seg_height, 1], [0, seg_height, 1]]))
         vertices_after_transform = np.matmul(bev_matrix, image_bottom_vertices)
 
         vertices_after_transform[:, 0] /= vertices_after_transform[2, 0]

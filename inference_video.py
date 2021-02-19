@@ -8,6 +8,7 @@ import cv2
 import rospy
 import time
 
+from calibration import INPUT_SHAPE
 from bev import bev_transform_tools
 import occgrid_to_ros
 
@@ -146,7 +147,7 @@ while True:
         # Publish to Occupancy Grid
         # Need to resize to be the same with the image size in calibration process
         # print(np.histogram(contour_noise_removed))
-        resized_segmap = cv2.resize(contour_noise_removed, (1280, 720))
+        resized_segmap = cv2.resize(contour_noise_removed, INPUT_SHAPE)
         occ_grid = perspective_transformer.create_occupancy_grid(
             resized_segmap, perspective_transformer._bev_matrix,
             perspective_transformer.width, perspective_transformer.height,
