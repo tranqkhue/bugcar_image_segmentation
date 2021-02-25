@@ -104,7 +104,7 @@ matrix = perspective_transformer._bev_matrix
 #print("Check model input:  ",model.inputs)
 cap = cv2.VideoCapture('test1.webm')
 
-unknown_profile = cv2.imread('filled.png')
+unknown_profile = cv2.imread('edge.png')
 unknown_profile = cv2.cvtColor(unknown_profile, cv2.COLOR_BGR2GRAY)
 
 #---------------------------------------------------------------------------------
