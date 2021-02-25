@@ -1,184 +1,181 @@
 import cv2
 import numpy as np
-from numpy import pi,cos,sin
+from numpy import pi, cos, sin
+import json
+from utils import order_points
 
-
-# When dealing with OpenCV functions
-# Numpy dimension order should be [height,width]
-# Not to be confused with [x,y] axis
 
 class bev_transform_tools:
 
-	# dist2target : distance from camera to the target: denoted (x,y) (cm)
-	# x is the horizontal distance
-	# y is the vertical distance
-	def __init__(self,image_shape,dist2target,tile_length):
-		self.width  = image_shape[1]
-		self.height = image_shape[0]
-		self.dist2target = dist2target
-		self.tile_length = tile_length # in cm
+    # dist2target : distance from camera to the target: denoted (x,y) (cm)
+    # x is the horizontal distance
+    # y is the vertical distance
+    def __init__(self, image_shape, dist2target, tile_length, cm_per_px, yaw):
+        self.width = image_shape[0]
+        self.height = image_shape[1]
+        self.dist2target = dist2target
+        self.tile_length = tile_length  # in cm
+        self.cm_per_px = cm_per_px
+        self.yaw = yaw
 
-	@property
-	def map_size(self):
-		return self.__occ_edge_m
-	@property
-	def map_resolution(self):
-		return self.__cell_size_in_m
+    @classmethod
+    def fromJSON(cls, filepath):
+        f = open(filepath, mode="r")
+        print(f)
+        data = json.load(f)
 
-	#--------------------------------------------------------------------------------------
+        shape = data["size"]
+        intrinsic_matrix = np.reshape(np.array(data['intrinsic matrix']),
+                                      (3, 3))
 
-	def calculate_derotation_matrix(self,M):
-		# Find the rotation matrix to make the bottom line straight again
-		# Counter-clockwise rotation
-		bot_left_corner  = np.dot(M,np.array([0,self.height,1]))
-		bot_left_corner  = bot_left_corner / bot_left_corner[2]
-		bot_right_corner = np.dot(M,np.array([self.width,self.height,1]))
-		bot_right_corner = bot_right_corner / bot_right_corner[2]
-		diagonal_line 	 = np.stack((bot_left_corner,bot_right_corner),axis = 0)
-		angle 	 = np.arctan2((diagonal_line[1][1]-diagonal_line[0][1]),\
-							  (diagonal_line[1][0]-diagonal_line[0][0]))
-		rotation = np.array([[np.cos(angle) , -np.sin(angle),0],
-				     [np.sin(angle), np.cos(angle),0],
-				     [0,0,1]])
+        dist2target = data["distance to target"]
+        tile_length = data["tile_length"]
+        occ_grid_size_in_m = data["occ_grid_size"]
+        cell_size_in_m = data['cell_size_in_m']
+        cm_per_px = data['cm_per_px']
+        yaw = data['yaw']
+        bev = cls(shape, dist2target, tile_length, cm_per_px, yaw)
+        bev._bev_matrix = intrinsic_matrix
+        bev.create_occ_grid_param(occ_grid_size_in_m, cell_size_in_m)
+        return bev
 
-		self.dero = rotation
-		return rotation
+    @property
+    def map_size(self):
+        return self.__cell_size_in_m * self.__occ_grid
 
-	#--------------------------------------------------------------------------------------
+    @property
+    def map_resolution(self):
+        return self.__cell_size_in_m
 
-	def calculate_detranlation_matrix(self,rotation_matrix,target_in_pixels):
-		# There are 4 steps to calculate_detranlation_matrix: 
-		# Given the target location (in pixels) after transformation. Derotate it with 'rotation_matrix'
-		# Calculate distance from target to POV origin ( in pixels).
-		# Hence, we derive the new origin from subtracting target location to distance from target to POV origin.
-		# The returned detranlation will translate the new origin back to its original location, which is (width/2, height)f
+    # --------------------------------------------------------------------------------------
+    def save_to_JSON(self, file_path):
+        f = open(file_path, mode="w")
 
-		target_to_origin_in_pixel = np.asarray((self.dist2target[0], self.dist2target[1]))\
-											   / self.pixel_to_cm
-		
-		target_after_derotation = np.dot(rotation_matrix,target_in_pixels)
-		origin_after_derotation = target_after_derotation[0:2] + target_to_origin_in_pixel
-		trans_x = self.width/2 -origin_after_derotation[0]
-		trans_y =  self.height- origin_after_derotation[1] 
-		translation = np.array([[1 , 0,trans_x],
-				     [0,1,trans_y],
-				     [0,0,1]])
+        data = {
+            "size": (self.width, self.height),
+            "intrinsic matrix": self._bev_matrix.tolist(),
+            "distance to target": self.dist2target,
+            "tile_length": self.tile_length,
+            "occ_grid_size": self.__occ_grid * self.__cell_size_in_m,
+            "cell_size_in_m": self.__cell_size_in_m,
+            "cm_per_px": self.cm_per_px,
+            "yaw": self.yaw
+        }
+        json.dump(data, f)
 
-		self.detran = translation
-		self.origin_in_bev = origin_after_derotation 
-		return translation
+    def calculate_transform_matrix(self, tile_coords, dist2target, cm_per_px,
+                                   width, height, tile_length, yaw):
+        dist2target_px = (dist2target[0] / cm_per_px,
+                          dist2target[1] / cm_per_px)
+        target_in_img = (width / 2 + dist2target_px[0],
+                         height - dist2target_px[1])
+        max_height = tile_length / cm_per_px
+        original_pts = np.array([[max_height / 2, max_height / 2],
+                                 [max_height / 2, -max_height / 2],
+                                 [-max_height / 2, -max_height / 2],
+                                 [-max_height / 2, max_height / 2]])
 
-	#--------------------------------------------------------------------------------------
+        #Then rotate the point around the origin by *yaw* angle
+        yaw_fid2cam_mat = np.array([[np.cos(yaw), -np.sin(yaw)],
+                                    [np.sin(yaw), np.cos(yaw)]])
+        unit_vec_along_x = np.array([100, 0])
+        rotated_unit_vec = np.matmul(yaw_fid2cam_mat, unit_vec_along_x)
+        rotated_unit_vec += target_in_img
+        bev_fiducial_axis = np.stack(
+            [np.asarray(target_in_img), rotated_unit_vec], axis=0)
+        print("bev_fiducial_axis", bev_fiducial_axis)
+        rotated_pts = np.zeros(original_pts.shape)
+        for i in range(len(original_pts)):
+            rotated_pts[i] = np.matmul(yaw_fid2cam_mat, original_pts[i])
+        rotated_pts += target_in_img
+        rotated_pts = order_points(rotated_pts, bev_fiducial_axis)
+        print("transformed corners", rotated_pts)
 
-	def calculate_transform_matrix(self,tile_coords):
-		# Choose 4 corner of the white tile 
-		top_left_tile  = tile_coords[0]
-		bot_left_tile  = tile_coords[1]
-		top_right_tile = tile_coords[2]
-		bot_right_tile = tile_coords[3]
+        M = cv2.getPerspectiveTransform(tile_coords.astype(np.float32),
+                                        rotated_pts.astype(np.float32))
 
-		# Find the longest edge of the tile quadrilateral
-		max_width_tile  = max(np.linalg.norm(top_left_tile - top_right_tile),\
-							  np.linalg.norm(bot_left_tile-bot_right_tile))
-		max_height_tile = max(np.linalg.norm(top_left_tile - bot_left_tile), \
-							  np.linalg.norm(bot_right_tile-top_right_tile))
-		zoom_out_ratio 	= 3
+        self._bev_matrix = M
+        return M
 
-		#print(max_height_tile)
-		max_height = 12 #int(max_height_tile/zoom_out_ratio) #max height should be 12		
-		self.tile_length_pixel = max_height 
-		#print(self.tile_length)
-		self.pixel_to_cm = self.tile_length / self.tile_length_pixel # this is cm/px
-		print('Pixel to meter factor: ', self.pixel_to_cm)
+    # --------------------------------------------------------------------------------------
 
-		dest = np.array([[0,0],[0,max_height-1],[max_height-1,0],[max_height-1,max_height-1]],dtype=np.float32)
-		top_left_tile_array = np.stack([top_left_tile for i in range(4)])
-		dest += top_left_tile_array
-		target_after_transform = (dest[0] + dest[3])/2  # this is the location of target in pixels
-		target_after_transform = np.array([target_after_transform[0],target_after_transform[1],1])
-		M = cv2.getPerspectiveTransform(tile_coords.astype(np.float32),dest)
-		self.M = M
-		rotation   	= self.calculate_derotation_matrix(M)
-		translation = self.calculate_detranlation_matrix(rotation,target_after_transform)
-		
-		#Multiply 3 matrix together in backward order: M rotation translation 
-		rot_trans 	= np.matmul(translation,rotation) 
-		
-		self.__intrinsic_matrix = np.matmul(rot_trans,M)
-		return self.__intrinsic_matrix
+    # --------------------------------------------------------------------------------------
 
-	#--------------------------------------------------------------------------------------
+    def create_occ_grid_param(self, occupancy_grid_size_in_m, cell_size_in_m):
+        # Occupancy grid should be square
+        # Should show every object in the 5m radius
+        self.__cell_size_in_m = cell_size_in_m  # except this
+        # all of these size are in pixels unit
+        self.__cell_size = (self.__cell_size_in_m * 100 / self.cm_per_px)
+        self.__occ_grid = int(occupancy_grid_size_in_m / self.__cell_size_in_m)
+        # this describe the length of the occupancy grid's edges in pixels
+        self.__occ_edge_pixel = int(self.__occ_grid * self.__cell_size)
 
-	def save_transform_matrix(save_path):
-		np.save(save_path,self.__intrinsic_matrix)
+    # --------------------------------------------------------------------------------------
+    @staticmethod
+    def create_occupancy_grid(segmap, bev_matrix, width, height,
+                              occupancy_grid_size_in_m, cell_size_in_m,
+                              cm_per_px):
+        # segmap must have the same size
+        seg_width = segmap.shape[1]
+        seg_height = segmap.shape[0]
+        cell_size = (cell_size_in_m * 100 / cm_per_px)
+        occ_grid = int(occupancy_grid_size_in_m / cell_size_in_m)
+        occ_edge_pixel = int(occ_grid * cell_size)
+        segmap = np.add(segmap, 1)
+        warped_img = cv2.warpPerspective(segmap, bev_matrix, (width, height))
+        left_x = int((width - occ_edge_pixel) / 2)
+        top_y = height - occ_edge_pixel
+        warped_left_x = int(np.clip(left_x, 0, np.inf))
+        warped_img = warped_img[int(np.clip(top_y, 0, np.Inf)):height,
+                                warped_left_x:warped_left_x + occ_edge_pixel]
+        occ_grid_left_x = int(np.clip(-left_x, 0, np.inf))
+        occ_grid_top_y = int(np.clip(-top_y, 0, np.inf))
+        template_occ_grid = np.zeros(shape=(occ_edge_pixel, occ_edge_pixel))
 
-	#--------------------------------------------------------------------------------------
+        template_occ_grid[occ_grid_top_y:occ_edge_pixel,
+                          occ_grid_left_x:occ_grid_left_x +
+                          warped_img.shape[1]] = warped_img
+        template_occ_grid = template_occ_grid.astype(np.uint8)
+        occ_grid_size = template_occ_grid.shape[0]
 
-	def create_occ_grid_param(self):
-		# Occupancy grid should be square 
-		# Should show every object in the 5m radius
-		self.__cell_size = int(10 / self.pixel_to_cm)  # all of these size are in pixels unit
-		self.__cell_size_in_m = self.pixel_to_cm * self.__cell_size /100 # except this
-		print('Occupancy Grid cell to meter', self.__cell_size_in_m)		
-		self.__occ_grid = int(10 / self.__cell_size_in_m)
-		self.__occ_edge_pixel = self.__occ_grid * self.__cell_size
-		self.__occ_edge_m = self.__occ_grid * self.__cell_size_in_m
+        image_bottom_vertices = np.transpose(
+            np.array([[seg_width, seg_height, 1], [0, seg_height, 1]]))
+        vertices_after_transform = np.matmul(bev_matrix, image_bottom_vertices)
 
-	#--------------------------------------------------------------------------------------
+        vertices_after_transform[:, 0] /= vertices_after_transform[2, 0]
+        vertices_after_transform[:, 1] /= vertices_after_transform[2, 1]
+        vertices_after_transform = vertices_after_transform[0:2, :]
+        vertices_after_transform[0] -= left_x
+        vertices_after_transform[1] -= top_y
+        vertices_after_transform_x_projection = np.copy(
+            vertices_after_transform)
+        vertices_after_transform_x_projection[1] = occ_grid_size
+        front_value = template_occ_grid[
+            int(occ_grid_size - 350 / cm_per_px):int(occ_grid_size -
+                                                     300 / cm_per_px),
+            int(occ_grid_size / 2 - 100 / cm_per_px):int(occ_grid_size / 2 +
+                                                         100 / cm_per_px)]
+        front_value = np.mean(front_value)
+        front_value = int(np.round(front_value))
 
-	def create_occupancy_grid(self,segmap):
-		segmap = np.add(segmap,1)
-		cell_size = self.__cell_size
-		warped_img = cv2.warpPerspective(segmap, self.__intrinsic_matrix,\
-										 (self.width, self.height))
-		x = int((self.width - self.__occ_edge_pixel)/2)
-		y = self.height 
-		warped_img = warped_img[y-(self.__occ_grid)*cell_size:y,x:x+self.__occ_edge_pixel]
-		warped_width,warped_height = warped_img.shape
+        unknown_area_poly = np.append(
+            vertices_after_transform,
+            np.flip(vertices_after_transform_x_projection, axis=1),
+            axis=1)
+        unknown_area_poly = np.transpose(unknown_area_poly)
+        unknown_area_poly = unknown_area_poly.astype(np.int32)
+        cv2.fillConvexPoly(template_occ_grid, unknown_area_poly, front_value)
 
-		front_value = warped_img[int(warped_height-175/self.pixel_to_cm):int(warped_height-170/self.pixel_to_cm),
-							     int(warped_width/2-100/self.pixel_to_cm):int(warped_width/2+100/self.pixel_to_cm)]
-		front_value = np.mean(front_value)
-		front_value = int(np.round(front_value))
-		warped_img  = cv2.rectangle(warped_img, (int(warped_width/2-100/self.pixel_to_cm),\
-												 int(warped_height-170/self.pixel_to_cm)),\
-												(int(warped_width/2+100/self.pixel_to_cm),\
-												 int(warped_height-50/self.pixel_to_cm)), \
-												 front_value, -1)
-		#warped_img = cv2.rectangle(warped_img, (0,0),(100,100),1,-1)
-		#occupancy_grid = (np.ones((self.__occ_grid,self.__occ_grid))* -1).astype(np.int8)
-		#visible_version_grid = np.zeros((self.occ_gridY,self.occ_gridX,3))
-		occupancy_grid = cv2.resize(warped_img,(self.__occ_grid,self.__occ_grid),\
-									interpolation=cv2.INTER_NEAREST)*100
-		occupancy_grid = np.where(occupancy_grid == 0 , -1, 200 - occupancy_grid)
-		occupancy_grid = cv2.flip(occupancy_grid,0)
-		occupancy_grid = cv2.rotate(occupancy_grid,cv2.ROTATE_90_COUNTERCLOCKWISE)
+        occupancy_grid = cv2.resize(
+            template_occ_grid,
+            (occ_grid, occ_grid),
+        ) * 100
+        occupancy_grid = np.where(occupancy_grid == 0, -1,
+                                  200 - occupancy_grid)
+        occupancy_grid = cv2.flip(occupancy_grid, 0)
+        occupancy_grid = cv2.rotate(occupancy_grid,
+                                    cv2.ROTATE_90_COUNTERCLOCKWISE)
 
-		occupancy_grid = occupancy_grid.astype('int8')
-		return occupancy_grid 
-
-#==========================================================================================
-if __name__ == "__main__":
-	img = cv2.resize(cv2.imread('test05.jpg',cv2.IMREAD_GRAYSCALE),(1024,512))
-	cv2.imshow('input',img)
-
-	target = (0,270)
-	tile_length = 60
-	top_left_tile  = np.array([426,370]) 
-	bot_left_tile  = np.array([406,409])
-	top_right_tile = np.array([574,371])
-	bot_right_tile = np.array([592,410])
-	tile 		   = np.stack((top_left_tile, bot_left_tile, \
-							  top_right_tile, bot_right_tile), axis = 0)
-	
-	perspective_transformer = bev_transform_tools(img.shape,target,tile_length)
-	matrix =  perspective_transformer.calculate_transform_matrix(tile)
-	M,dero,detran = (perspective_transformer.M,perspective_transformer.dero,perspective_transformer.detran)
-	warped_img = cv2.warpPerspective(img,matrix,(1024,512))
-	cv2.imshow('bev',warped_img)
-
-	perspective_transformer.create_occ_grid_param()
-	occ_grid = perspective_transformer.create_occupancy_grid(img).astype('float32')
-	resized_occ_grid = cv2.resize(occ_grid,(360,360))
-	cv2.imshow('occupancy_grid', resized_occ_grid)
-	cv2.waitKey(0)
+        occupancy_grid = occupancy_grid.astype('int8')
+        return occupancy_grid
