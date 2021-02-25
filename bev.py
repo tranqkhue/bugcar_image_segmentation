@@ -151,6 +151,7 @@ class bev_transform_tools:
         vertices_after_transform_x_projection = np.copy(
             vertices_after_transform)
         vertices_after_transform_x_projection[1] = occ_grid_size
+        '''
         front_value = template_occ_grid[
             int(occ_grid_size - 350 / cm_per_px):int(occ_grid_size -
                                                      300 / cm_per_px),
@@ -166,6 +167,7 @@ class bev_transform_tools:
         unknown_area_poly = np.transpose(unknown_area_poly)
         unknown_area_poly = unknown_area_poly.astype(np.int32)
         cv2.fillConvexPoly(template_occ_grid, unknown_area_poly, front_value)
+        '''
 
         occupancy_grid = cv2.resize(
             template_occ_grid,

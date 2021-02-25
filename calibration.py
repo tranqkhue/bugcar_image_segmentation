@@ -10,7 +10,7 @@ from utils import order_points, clahe
 # accepted params are (640,480),(1280,720),(1920,1680)
 INPUT_SHAPE = (1280, 720)
 FPS = 15
-WARPED_IMG_SHAPE = (1024, 512)
+WARPED_IMG_SHAPE = (768, 2048)
 
 MARKER_LENGTH = 0.55
 CM_PER_PX = 2
