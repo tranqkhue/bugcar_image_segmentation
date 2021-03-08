@@ -8,47 +8,10 @@ import pyrealsense2 as rs
 from utils import order_points, clahe
 import argparse
 
-INPUT_SHAPE = (960, 540)
-FPS = 60
+INPUT_SHAPE = (1920, 1080)
+FPS = 30
 MAP_SIZE = 10
 CELL_SIZE = 0.1
-
-## add argument
-#================================================================
-parser = argparse.ArgumentParser()
-parser.add_argument("-m",
-                    "--marker_length",
-                    help="the size of the aruco marker (in metres)",
-                    type=float)
-parser.add_argument("-c",
-                    "--cm_per_px",
-                    help="how many cms does 1 px in bev image represent",
-                    type=int)
-parser.add_argument("-s",
-                    "--warped_shape",
-                    help="the size of the bev image",
-                    type=int,
-                    nargs=2)
-args = parser.parse_args()
-# input shape for bev, also for realsense ioreader to function correctly
-# accepted params are (640,480),(1280,720),(1920,1680)
-
-if not args.warped_shape:
-    WARPED_IMG_SHAPE = (768, 1024)
-else:
-    WARPED_IMG_SHAPE = args.warped_shape
-if not args.marker_length:
-    MARKER_LENGTH = 0.5
-else:
-    MARKER_LENGTH = args.marker_length
-if not args.cm_per_px:
-    CM_PER_PX = 2
-else:
-    CM_PER_PX = args.cm_per_px
-
-print(args)
-# print(CM_PER_PX, WARPED_IMG_SHAPE, MARKER_LENGTH)
-#================================================================
 
 
 def calibrate_with_median(corners_list):
@@ -92,6 +55,43 @@ def find_distance_from_fiducial_to_camera_in_bev_frame(tvec, yaw_bev2fid,
 
 
 if __name__ == "__main__":
+    ## add argument
+    #================================================================
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m",
+                        "--marker_length",
+                        help="the size of the aruco marker (in metres)",
+                        type=float)
+    parser.add_argument("-c",
+                        "--cm_per_px",
+                        help="how many cms does 1 px in bev image represent",
+                        type=int)
+    parser.add_argument("-s",
+                        "--warped_shape",
+                        help="the size of the bev image",
+                        type=int,
+                        nargs=2)
+    args = parser.parse_args()
+    # input shape for bev, also for realsense ioreader to function correctly
+    # accepted params are (640,480),(1280,720),(1920,1680)
+
+    if not args.warped_shape:
+        WARPED_IMG_SHAPE = (768, 1024)
+    else:
+        WARPED_IMG_SHAPE = args.warped_shape
+    if not args.marker_length:
+        MARKER_LENGTH = 0.5
+    else:
+        MARKER_LENGTH = args.marker_length
+    if not args.cm_per_px:
+        CM_PER_PX = 2
+    else:
+        CM_PER_PX = args.cm_per_px
+
+    print(args)
+    # print(CM_PER_PX, WARPED_IMG_SHAPE, MARKER_LENGTH)
+    #================================================================
+
     is_calibrating = False
     frame = []
     ordered_corners_list = []

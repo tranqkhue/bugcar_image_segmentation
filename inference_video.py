@@ -12,31 +12,12 @@ from calibration import INPUT_SHAPE
 from bev import bev_transform_tools
 import occgrid_to_ros
 from utils import contour_noise_removal, enet_preprocessing
-
+from models import ENET
 logger = logging.Logger('lmao')
 
 #================================================================================
 
-
 #---------------------------------------------------------------------------------
-class ENET:
-    INPUT_TENSOR_NAME = "input0:0"
-    OUTPUT_TENSOR_NAME = "CATkrIDy/concat:0"
-
-    def __init__(self, GRAPH_PB_PATH):
-        self.sess = tf.compat.v1.Session()
-        with tf.compat.v1.gfile.GFile(GRAPH_PB_PATH, 'rb') as f:
-            string = f.read()
-            graph_def = tf.compat.v1.GraphDef()
-            graph_def.ParseFromString(string)
-            self.sess.graph.as_default()
-            tf.import_graph_def(graph_def, name='')
-
-    def predict(self, image):
-        segmap = self.sess.run(self.OUTPUT_TENSOR_NAME,
-                               feed_dict={self.INPUT_TENSOR_NAME: image})
-        return segmap
-
 
 #================================================================================
 # Initialize
@@ -51,13 +32,16 @@ if gpus:
     except RuntimeError as e:
         print(e)
 # model = tf.keras.models.load_model('model.hdf5')
-model = ENET('my_model.pb')
-perspective_transformer = bev_transform_tools.fromJSON('calibration_data.json')
+model = ENET('pretrained_models/enet.pb')
+perspective_transformer = bev_transform_tools.fromJSON(
+    'calibration_data_30fps.json')
 matrix = perspective_transformer._bev_matrix
 #print("Check model input:  ",model.inputs)
 cap = cv2.VideoCapture("test1.webm")
-cap.set(3, 1280)
-cap.set(4, 720)
+width = INPUT_SHAPE[0]
+height = INPUT_SHAPE[1]
+cap.set(3, width)
+cap.set(4, height)
 
 #---------------------------------------------------------------------------------
 

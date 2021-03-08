@@ -13,7 +13,7 @@ import cv2
 
 def init_node():
     rospy.init_node("image_segmentation", anonymous=True)
-    map_topic = "map/image_segmentation"
+    map_topic = "map/abc"
     OG_publisher = rospy.Publisher(map_topic,
                                    OccupancyGrid,
                                    queue_size=5,
@@ -27,8 +27,9 @@ def init_node():
 def og_msg(occ_grid, map_resolution, map_size, time_stamp):
     MAP_RESOLUTION = map_resolution  #Unit: Meter
     MAP_SIZE = map_size  #Unit: Meter, Shape: Square with center "base_link"
-
     map_img = cv2.flip(occ_grid, 0)
+    map_img = cv2.rotate(map_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    map_img = cv2.flip(map_img, 1)
     occupancy_grid = map_img.flatten()
     occupancy_grid = occupancy_grid.tolist()
 
@@ -46,8 +47,8 @@ def og_msg(occ_grid, map_resolution, map_size, time_stamp):
 
     map_msg.info.origin = Pose()
     map_msg.info.origin.position = Point()
-    map_msg.info.origin.position.x = -MAP_SIZE / 2  #Unit: Meter
-    map_msg.info.origin.position.y = 0  #Unit: Meter
+    map_msg.info.origin.position.x = 0  #Unit: Meter
+    map_msg.info.origin.position.y = -MAP_SIZE / 2  #Unit: Meter
     map_msg.info.origin.position.z = 0
     map_msg.info.origin.orientation = Quaternion()
     map_msg.info.origin.orientation.x = 0
