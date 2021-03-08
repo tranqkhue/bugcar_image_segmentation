@@ -110,6 +110,8 @@ class bev_transform_tools:
         self.__occ_grid = int(occupancy_grid_size_in_m / self.__cell_size_in_m)
         # this describe the length of the occupancy grid's edges in pixels
         self.__occ_edge_pixel = int(self.__occ_grid * self.__cell_size)
+        # WARNINGS: setting cell_size_in_m to anything else beside 0.1 will result in an
+        # image with small occupied dots at the edges of the warped occupancy grid
 
     # --------------------------------------------------------------------------------------
     @staticmethod
@@ -117,8 +119,7 @@ class bev_transform_tools:
                               occupancy_grid_size_in_m, cell_size_in_m,
                               cm_per_px):
         # segmap must have the same size
-        seg_width = segmap.shape[1]
-        seg_height = segmap.shape[0]
+        # cv2.imshow("segmap", segmap * 100)
         cell_size = (cell_size_in_m * 100 / cm_per_px)
         occ_grid = int(occupancy_grid_size_in_m / cell_size_in_m)
         occ_edge_pixel = int(occ_grid * cell_size)
@@ -129,6 +130,7 @@ class bev_transform_tools:
         warped_left_x = int(np.clip(left_x, 0, np.inf))
         warped_img = warped_img[int(np.clip(top_y, 0, np.Inf)):height,
                                 warped_left_x:warped_left_x + occ_edge_pixel]
+        # cv2.imshow("warped", warped_img * 100)
         occ_grid_left_x = int(np.clip(-left_x, 0, np.inf))
         occ_grid_top_y = int(np.clip(-top_y, 0, np.inf))
         template_occ_grid = np.zeros(shape=(occ_edge_pixel, occ_edge_pixel))
@@ -137,47 +139,23 @@ class bev_transform_tools:
                           occ_grid_left_x:occ_grid_left_x +
                           warped_img.shape[1]] = warped_img
         template_occ_grid = template_occ_grid.astype(np.uint8)
-        occ_grid_size = template_occ_grid.shape[0]
+        isOccupiedGrid = (template_occ_grid * 256 / 2).astype(np.uint8)
 
-        image_bottom_vertices = np.transpose(
-            np.array([[seg_width, seg_height, 1], [0, seg_height, 1]]))
-        vertices_after_transform = np.matmul(bev_matrix, image_bottom_vertices)
-
-        vertices_after_transform[:, 0] /= vertices_after_transform[2, 0]
-        vertices_after_transform[:, 1] /= vertices_after_transform[2, 1]
-        vertices_after_transform = vertices_after_transform[0:2, :]
-        vertices_after_transform[0] -= left_x
-        vertices_after_transform[1] -= top_y
-        vertices_after_transform_x_projection = np.copy(
-            vertices_after_transform)
-        vertices_after_transform_x_projection[1] = occ_grid_size
-        '''
-        front_value = template_occ_grid[
-            int(occ_grid_size - 350 / cm_per_px):int(occ_grid_size -
-                                                     300 / cm_per_px),
-            int(occ_grid_size / 2 - 100 / cm_per_px):int(occ_grid_size / 2 +
-                                                         100 / cm_per_px)]
-        front_value = np.mean(front_value)
-        front_value = int(np.round(front_value))
-
-        unknown_area_poly = np.append(
-            vertices_after_transform,
-            np.flip(vertices_after_transform_x_projection, axis=1),
-            axis=1)
-        unknown_area_poly = np.transpose(unknown_area_poly)
-        unknown_area_poly = unknown_area_poly.astype(np.int32)
-        cv2.fillConvexPoly(template_occ_grid, unknown_area_poly, front_value)
-        '''
+        morphKernel = np.ones((3, 3))
+        isOccupiedGrid = cv2.erode(isOccupiedGrid, morphKernel)
+        isOccupiedGrid = cv2.dilate(isOccupiedGrid, morphKernel)
+        mask1 = np.where(isOccupiedGrid > 0, 1, 0)
+        mask2 = np.where(template_occ_grid == 1, 1, 0)
+        subtract_mask = cv2.subtract(mask2, mask1)
+        template_occ_grid = np.where(subtract_mask > 0, 2, template_occ_grid)
 
         occupancy_grid = cv2.resize(
             template_occ_grid,
             (occ_grid, occ_grid),
         ) * 100
+        # print(np.histogram(occupancy_grid))
         occupancy_grid = np.where(occupancy_grid == 0, -1,
                                   200 - occupancy_grid)
-        occupancy_grid = cv2.flip(occupancy_grid, 0)
-        occupancy_grid = cv2.rotate(occupancy_grid,
-                                    cv2.ROTATE_90_COUNTERCLOCKWISE)
 
         occupancy_grid = occupancy_grid.astype('int8')
         return occupancy_grid

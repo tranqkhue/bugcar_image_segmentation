@@ -18,3 +18,6 @@
 - Fire up `roscore` first.
 - Run ` python inference_video.py` for inferencing and publishing occupancy grid.
   (This script does not support tensorflow-CPU)
+
+### error: 
+anyway, 60fps should be optimal,since while the camera is running on 30 FPS mode,  during sharp turn, the image will be blurred a lot by artifact.

@@ -1,19 +1,54 @@
 import sys
+from time import time
 import cv2
 import numpy as np
 from bev import bev_transform_tools
 import matplotlib.pyplot as plt
 import pyrealsense2 as rs
 from utils import order_points, clahe
+import argparse
 
+INPUT_SHAPE = (960, 540)
+FPS = 60
+MAP_SIZE = 10
+CELL_SIZE = 0.1
+
+## add argument
+#================================================================
+parser = argparse.ArgumentParser()
+parser.add_argument("-m",
+                    "--marker_length",
+                    help="the size of the aruco marker (in metres)",
+                    type=float)
+parser.add_argument("-c",
+                    "--cm_per_px",
+                    help="how many cms does 1 px in bev image represent",
+                    type=int)
+parser.add_argument("-s",
+                    "--warped_shape",
+                    help="the size of the bev image",
+                    type=int,
+                    nargs=2)
+args = parser.parse_args()
 # input shape for bev, also for realsense ioreader to function correctly
 # accepted params are (640,480),(1280,720),(1920,1680)
-INPUT_SHAPE = (1280, 720)
-FPS = 15
-WARPED_IMG_SHAPE = (768, 2048)
 
-MARKER_LENGTH = 0.55
-CM_PER_PX = 2
+if not args.warped_shape:
+    WARPED_IMG_SHAPE = (768, 1024)
+else:
+    WARPED_IMG_SHAPE = args.warped_shape
+if not args.marker_length:
+    MARKER_LENGTH = 0.5
+else:
+    MARKER_LENGTH = args.marker_length
+if not args.cm_per_px:
+    CM_PER_PX = 2
+else:
+    CM_PER_PX = args.cm_per_px
+
+print(args)
+# print(CM_PER_PX, WARPED_IMG_SHAPE, MARKER_LENGTH)
+#================================================================
 
 
 def calibrate_with_median(corners_list):
@@ -73,9 +108,11 @@ if __name__ == "__main__":
         while True:
             #find camera matrix and distortion coefficient
             #================================================
+            t0 = time()
             pipeline_frames = pipeline.wait_for_frames()
             pipeline_rgb_frame = pipeline_frames.get_color_frame()
             frame = np.asanyarray(pipeline_rgb_frame.get_data())
+            print("fps:", 1 / (time() - t0))
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             fx = pipeline_rgb_frame.profile.as_video_stream_profile(
             ).intrinsics.fx
@@ -205,7 +242,7 @@ if __name__ == "__main__":
                     refined_corners, bev_tool.dist2target, bev_tool.cm_per_px,
                     bev_tool.width, bev_tool.height, bev_tool.tile_length,
                     bev_tool.yaw)
-                bev_tool.create_occ_grid_param(10, 0.1)
+                bev_tool.create_occ_grid_param(MAP_SIZE, CELL_SIZE)
                 bev_tool.save_to_JSON("calibration_data.json")
                 mat = bev_tool._bev_matrix
                 warped = cv2.warpPerspective(frame, mat, WARPED_IMG_SHAPE)
