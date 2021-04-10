@@ -8,8 +8,8 @@ print("gpu:", gpus)
 if gpus:
     try:
         tf.config.experimental.set_memory_growth(gpus[0], True)
-        tf.config.experimental.set_virtual_device_configuration(gpus[0], \
-         [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=700)])
+        tf.config.experimental.set_virtual_device_configuration(gpus[0],
+                                                                [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=700)])
     except RuntimeError as e:
         print(e)
 saver = tf.train.Checkpoint()
@@ -24,16 +24,16 @@ IMAGE_STD = np.array([0.229, 0.224, 0.225])
 # save_path = saver.save("model.ckpt")
 
 
-def process_image(img):
+def process_and_infer_image(img):
     # convert image from bgr to rgb
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = cv2.resize(img, (512, 256))
-    # cv2.imshow("img",img)
+    # #cv2.imshow("img",img)
     img = img / 256.0
     img = np.subtract(img, IMAGE_MEAN)
     img = np.divide(img, IMAGE_STD)
     imgs = np.array([img])
-    #change image shape from [1,256,512,3] to [1,3,256,512]
+    # change image shape from [1,256,512,3] to [1,3,256,512]
     imgs = np.swapaxes(imgs, 2, 3)
     imgs = np.swapaxes(imgs, 1, 2)
 
@@ -51,13 +51,14 @@ def calculate_accuracy(pred, mask):
 
 
 def evaluate_image(img, mask):
-    output = process_image(img)
+    output = process_and_infer_image(img)
     mask = cv2.resize(mask, (256, 128))
     iou = calculate_accuracy(output, mask)
     return iou, output
 
 
 def evaluate_folder():
+    # change your train data here
     DATA_SRC = "../data/Road_data/self-collected dataset"
     IMG_SRC = "../data/Road_data/self-collected dataset/img"
     MASK_SRC = "../data/Road_data/self-collected dataset/masks_machine"

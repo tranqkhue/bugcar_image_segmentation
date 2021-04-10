@@ -1,6 +1,5 @@
 import tensorflow as tf
 import numpy as np
-import cv2
 
 
 class ENET:
@@ -15,7 +14,7 @@ class ENET:
             graph_def.ParseFromString(string)
             self.sess.graph.as_default()
             tf.import_graph_def(graph_def, name='')
-
+    # @profile
     def predict(self, image):
         segmap = self.sess.run(self.OUTPUT_TENSOR_NAME,
                                feed_dict={self.INPUT_TENSOR_NAME: image})
@@ -27,7 +26,7 @@ class DeepLabV3:
     INPUT_TENSOR_NAME = 'import/ImageTensor:0'
     OUTPUT_TENSOR_NAME = 'import/SemanticPredictions:0'
     INPUT_SIZE = 1024
-    FROZEN_GRAPH_NAME = 'frozen_inference_graph.pb'
+    FROZEN_GRAPH_NAME = 'deeplab.pb'
 
     def __init__(self, GRAPH_PB_PATH):
         self.sess = tf.compat.v1.Session()
@@ -45,7 +44,7 @@ class DeepLabV3:
         resize_ratio = 1.0 * self.INPUT_SIZE / max(width, height)
         target_size = (int(resize_ratio * width), int(resize_ratio * height))
         print(target_size)
-        resized_image = img  #cv2.resize(img, target_size)
+        resized_image = img  # cv2.resize(img, target_size)
         batch_seg_map = self.sess.run(
             self.OUTPUT_TENSOR_NAME,
             feed_dict={self.INPUT_TENSOR_NAME: [np.asarray(resized_image)]})
