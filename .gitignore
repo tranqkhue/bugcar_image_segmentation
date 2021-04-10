@@ -43,3 +43,5 @@ nodeLanguageServer/**
 nodeLanguageServer.*/**
 test.webm
 .vscode
+*.webm
+*.json

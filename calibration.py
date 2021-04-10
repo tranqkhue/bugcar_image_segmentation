@@ -1,19 +1,16 @@
-import sys
+from time import time
 import cv2
 import numpy as np
 from bev import bev_transform_tools
 import matplotlib.pyplot as plt
 import pyrealsense2 as rs
 from utils import order_points, clahe
+import argparse
 
-# input shape for bev, also for realsense ioreader to function correctly
-# accepted params are (640,480),(1280,720),(1920,1680)
-INPUT_SHAPE = (1280, 720)
-FPS = 15
-WARPED_IMG_SHAPE = (1024, 512)
-
-MARKER_LENGTH = 0.55
-CM_PER_PX = 2
+INPUT_SHAPE = {"30fps": (1920, 1080), "60fps": (960, 540)}
+FPS = 30
+MAP_SIZE = 10
+CELL_SIZE = 0.1
 
 
 def calibrate_with_median(corners_list):
@@ -41,7 +38,7 @@ def find_distance_from_fiducial_to_camera_in_bev_frame(tvec, yaw_bev2fid,
     # however , the ROTATION matrix of cam2fid and bev2fid are not identical.
     yaw_mat_bev2fid = np.array(
         [[np.cos(yaw_bev2fid), -np.sin(yaw_bev2fid), 0],
-         [np.sin(yaw_bev2fid), np.cos(yaw_bev2fid), 0],\
+         [np.sin(yaw_bev2fid), np.cos(yaw_bev2fid), 0],
          [0, 0, 1]])
     yaw_mat_fid2bev = np.linalg.inv(yaw_mat_bev2fid)
     rot_mat_cam2bev = np.matmul(yaw_mat_fid2bev, rot_mat_cam2fid)
@@ -57,6 +54,34 @@ def find_distance_from_fiducial_to_camera_in_bev_frame(tvec, yaw_bev2fid,
 
 
 if __name__ == "__main__":
+    # add argument
+    # ================================================================
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m",
+                        "--marker_length",
+                        help="the size of the aruco marker (in metres)",
+                        type=float, default=0.5)
+    parser.add_argument("-c",
+                        "--cm_per_px",
+                        help="how many cms does 1 px in bev image represent",
+                        type=int, default=2)
+    parser.add_argument("-s",
+                        "--warped_shape",
+                        help="the size of the bev image",
+                        type=int,
+                        nargs=2, default=(768, 1024))
+    args = parser.parse_args()
+    # input shape for bev, also for realsense ioreader to function correctly
+    # accepted params are (640,480),(1280,720),(1920,1680)
+
+    WARPED_IMG_SHAPE = args.warped_shape
+    MARKER_LENGTH = args.marker_length
+    CM_PER_PX = args.cm_per_px
+    print(args)
+    INPUT_SHAPE = INPUT_SHAPE["30fps"]
+
+    # print(CM_PER_PX, WARPED_IMG_SHAPE, MARKER_LENGTH)
+    # ================================================================
     is_calibrating = False
     frame = []
     ordered_corners_list = []
@@ -71,8 +96,8 @@ if __name__ == "__main__":
     pipeline.start(config)
     try:
         while True:
-            #find camera matrix and distortion coefficient
-            #================================================
+            # find camera matrix and distortion coefficient
+            # ================================================
             pipeline_frames = pipeline.wait_for_frames()
             pipeline_rgb_frame = pipeline_frames.get_color_frame()
             frame = np.asanyarray(pipeline_rgb_frame.get_data())
@@ -89,10 +114,10 @@ if __name__ == "__main__":
             distortion_coeffs = np.array(
                 pipeline_rgb_frame.profile.as_video_stream_profile(
                 ).intrinsics.coeffs)
-            #================================================
+            # ================================================
 
-            #detect corners and relative pose of fiducial to the camera.
-            #================================================
+            # detect corners and relative pose of fiducial to the camera.
+            # ================================================
             (corners, ids,
              rejected) = cv2.aruco.detectMarkers(clahe(frame),
                                                  aruco_dict,
@@ -103,10 +128,10 @@ if __name__ == "__main__":
                 markerLength=MARKER_LENGTH,
                 distCoeffs=distortion_coeffs,
                 cameraMatrix=K)
-            #================================================
+            # ================================================
 
             # Find the yaw of camera with respect to the aruco's coordinate frame
-            #================================================
+            # ================================================
             rvec = result[0]
             tvec = result[1]
             if rvec is not None:
@@ -114,22 +139,37 @@ if __name__ == "__main__":
                 # Sometimes, there will be 2 possible rotation vectors for 1 marker.
                 # It is not clear as to what is causing this behaviour, further research needed!
                 for rotation in rvec:
-                    # print(rotation)
+                    print("=================")
+                    print(rotation)
                     rotation_mat_fid2cam, _ = cv2.Rodrigues(rotation)
                     rotation_mat_cam2fid = np.linalg.inv(rotation_mat_fid2cam)
+                    print("rotmat cam2fid", rotation_mat_cam2fid)
                     # the formula can be found here
-                    #http://planning.cs.uiuc.edu/node102.html#eqn:yprmat
+                    # http://planning.cs.uiuc.edu/node102.html#eqn:yprmat
                     yaw_cam2fid = np.arctan2(rotation_mat_cam2fid[1, 0],
                                              rotation_mat_cam2fid[0, 0])
-                    # print("yaw_cam2fid", yaw_cam2fid, file=sys.stderr)
+
+                    # =====added to find the rotation between camera frame and ground frame=====
+                    yaw_cam2fid_mat = np.array(
+                        [[np.cos(yaw_cam2fid), -np.sin(yaw_cam2fid), 0],
+                         [np.sin(yaw_cam2fid), np.cos(yaw_cam2fid), 0],
+                         [0, 0, 1]])
+                    rotation_mat_cam2bev = np.matmul(np.linalg.inv(
+                        yaw_cam2fid_mat), rotation_mat_cam2fid)
+                    print("inverse yaw mat", np.linalg.inv(yaw_cam2fid_mat))
+                    print("result", rotation_mat_cam2bev)
+                    np.save("rotmat_cam2bev", rotation_mat_cam2bev)
+                    # ===========================================================================
+
                     unit_vector_along_x_axis_in_fiducial_frame = np.array(
                         [0.3, 0, 0])
+                    # 0.3 is a random number, technically you can replace it with any positive number
                     origin_fiducial = np.array([0, 0, 0])
                     axis_in_fiducial = np.stack([
                         origin_fiducial,
                         unit_vector_along_x_axis_in_fiducial_frame
                     ],
-                                                axis=0)
+                        axis=0)
                     # this vector indicate that the point is 1m,wrt x-axis, away from the fiducial center.
                     axis, _ = cv2.projectPoints(objectPoints=axis_in_fiducial,
                                                 rvec=rotation,
@@ -148,17 +188,17 @@ if __name__ == "__main__":
                     # x-axis heads right
                     # z-axis heads forward
                     # to sum up, camera axes follows NED format.
-            #================================================
+            # ================================================
 
             # set the logic for calibrating aruco's marked corners, which basically can jump anywhere(based on observation) within the 10x10 square
             # in the vicinity of the true corner.
             # To tackle this, for each calibration process during which the marker must be fixed,
             # 100 samples of the corners' position are collected and passed through a median filter.
             # The result will be the conclusive corners of the marker.
-            #================================================
+            # ================================================
             if len(corners) > 0:
                 for point in corners[0][0]:
-                    cv2.circle(frame, (point[0], point[1]), 0, (0, 255, 0), -1)
+                    cv2.circle(frame, (point[0], point[1]), 1, (0, 255, 0), -1)
                 if is_calibrating == True:
                     if len(ordered_corners_list) < 100:
                         # these are the point before being resized
@@ -168,11 +208,11 @@ if __name__ == "__main__":
                     else:
                         refined_corners = calibrate_with_median(
                             ordered_corners_list)
-            #================================================
+            # ================================================
 
-            #processing translation vector information
+            # processing translation vector information
             # translation vector represent the position of fiducial relative to the camera frame, more info below
-            #================================================
+            # ================================================
             if tvec is not None:
                 tvec = np.array(tvec)[0][0]
                 distance_x, distance_y = find_distance_from_fiducial_to_camera_in_bev_frame(
@@ -182,12 +222,12 @@ if __name__ == "__main__":
                 # x is how left you are from the target. >0 means your camera is to the left of the target
                 # y is how low your are from the target. >0 means that the target is above the baseline of your camera
                 # https://answers.opencv.org/question/197197/what-does-rvec-and-tvec-of-aruco-markers-correspond-to/
-            #================================================
+            # ================================================
 
             # special keys to interact with the program
-            #================================================
-            cv2.imshow('image', frame)
-            key = cv2.waitKey(25)
+            # ================================================
+            cv2.imshow('image', cv2.resize(frame, (1280, 768)))
+            key = cv2.waitKey(2)
             if (key & 0xFF == ord("c")):
                 is_calibrating = True
                 print("start calibrating,hold the aruco marker still")
@@ -205,12 +245,12 @@ if __name__ == "__main__":
                     refined_corners, bev_tool.dist2target, bev_tool.cm_per_px,
                     bev_tool.width, bev_tool.height, bev_tool.tile_length,
                     bev_tool.yaw)
-                bev_tool.create_occ_grid_param(10, 0.1)
+                bev_tool.create_occ_grid_param(MAP_SIZE, CELL_SIZE)
                 bev_tool.save_to_JSON("calibration_data.json")
                 mat = bev_tool._bev_matrix
                 warped = cv2.warpPerspective(frame, mat, WARPED_IMG_SHAPE)
-                cv2.imshow("warped", warped)
-    #===============================================
+              # cv2.imshow("warped", warped)
+    # ===============================================
     finally:
         pipeline.stop()
         cv2.destroyAllWindows()
