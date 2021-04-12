@@ -29,25 +29,13 @@ class bev_transform_tools:
         shape = data["size"]
         bev_matrix = np.reshape(np.array(data['bev matrix']),
                                 (3, 3))
-
         dist2target = data["distance to target"]
         tile_length = data["tile_length"]
-        occ_grid_size_in_m = data["occ_grid_size"]
-        cell_size_in_m = data['cell_size_in_m']
         cm_per_px = data['cm_per_px']
         yaw = data['yaw']
         bev = cls(shape, dist2target, tile_length, cm_per_px, yaw)
         bev._bev_matrix = bev_matrix
-        bev.create_occ_grid_param(occ_grid_size_in_m, cell_size_in_m)
         return bev
-
-    @property
-    def map_size(self):
-        return self.__cell_size_in_m * self.__occ_grid
-
-    @property
-    def map_resolution(self):
-        return self.__cell_size_in_m
 
     # --------------------------------------------------------------------------------------
     def save_to_JSON(self, file_path):
@@ -58,8 +46,6 @@ class bev_transform_tools:
             "bev matrix": self._bev_matrix.tolist(),
             "distance to target": self.dist2target,
             "tile_length": self.tile_length,
-            "occ_grid_size": self.__occ_grid * self.__cell_size_in_m,
-            "cell_size_in_m": self.__cell_size_in_m,
             "cm_per_px": self.cm_per_px,
             "yaw": self.yaw
         }
@@ -103,38 +89,27 @@ class bev_transform_tools:
 
     # --------------------------------------------------------------------------------------
 
-    def create_occ_grid_param(self, occupancy_grid_size_in_m, cell_size_in_m):
-        # Occupancy grid should be square
-        # Should show every object in the 5m radius
-        self.__cell_size_in_m = cell_size_in_m  # except this
-        # all of these size are in pixels unit
-        self.__cell_size = (self.__cell_size_in_m * 100 / self.cm_per_px)
-        self.__occ_grid = int(occupancy_grid_size_in_m / self.__cell_size_in_m)
-        # this describe the length of the occupancy grid's edges in pixels
-        self.__occ_edge_pixel = int(self.__occ_grid * self.__cell_size)
-        # WARNINGS: setting cell_size_in_m to anything else beside 0.1 will result in an
-        # image with small occupied dots at the edges of the warped occupancy grid ( maybe fixed now?)
-
-    # --------------------------------------------------------------------------------------
     def create_occupancy_grid(self, segmap, bev_matrix, width, height,
-                              occupancy_grid_size_in_m, cell_size_in_m,
+                              occupancy_grid_width_in_m, occupancy_grid_height_in_m, cell_size_in_m,
                               cm_per_px):
         # segmap must have the same size
         cell_size = (cell_size_in_m * 100 / cm_per_px)
-        occ_grid = int(occupancy_grid_size_in_m / cell_size_in_m)
-        occ_edge_pixel = int(occ_grid * cell_size)
+        occ_grid_width = int(occupancy_grid_width_in_m / cell_size_in_m)
+        occ_width_pixel = int(occ_grid_width * cell_size)
+        occ_grid_height = int(occupancy_grid_height_in_m / cell_size_in_m)
+        occ_height_pixel = int(occ_grid_height*cell_size)
         segmap = np.add(segmap, 1)
         warped_img = cv2.warpPerspective(segmap, bev_matrix, (width, height))
-        left_x = int((width - occ_edge_pixel) / 2)
-        top_y = height - occ_edge_pixel
+        left_x = int((width - occ_width_pixel) / 2)
+        top_y = height - occ_height_pixel
         warped_left_x = int(np.clip(left_x, 0, np.inf))
         warped_img = warped_img[int(np.clip(top_y, 0, np.Inf)):height,
-                                warped_left_x:warped_left_x + occ_edge_pixel]
+                                warped_left_x:warped_left_x + occ_width_pixel]
         occ_grid_left_x = int(np.clip(-left_x, 0, np.inf))
         occ_grid_top_y = int(np.clip(-top_y, 0, np.inf))
-        template_occ_grid = np.zeros(shape=(occ_edge_pixel, occ_edge_pixel))
+        template_occ_grid = np.zeros(shape=(occ_height_pixel, occ_width_pixel))
 
-        template_occ_grid[occ_grid_top_y:occ_edge_pixel,
+        template_occ_grid[occ_grid_top_y:occ_height_pixel,
                           occ_grid_left_x:occ_grid_left_x +
                           warped_img.shape[1]] = warped_img
         template_occ_grid = template_occ_grid.astype(np.uint8)
@@ -145,12 +120,10 @@ class bev_transform_tools:
         mask1 = (morphGrid > 0).astype(np.uint8)
         subtract_mask = cv2.subtract(isOccupiedGrid, mask1)
         template_occ_grid = np.where(subtract_mask > 0, 2, template_occ_grid)
-
         occupancy_grid = cv2.resize(
             template_occ_grid,
-            (occ_grid, occ_grid),
+            (occ_grid_width, occ_grid_height), interpolation=cv2.INTER_NEAREST
         ) * 100
-        cv2.imshow("occ grid 2", occupancy_grid)
         occupancy_grid = np.where(occupancy_grid == 0, -1,
                                   200 - occupancy_grid).astype(np.int8)
         return occupancy_grid

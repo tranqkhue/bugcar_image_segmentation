@@ -122,7 +122,7 @@ if __name__ == "__main__":
             pts = convert2pts(pipeline_depth_frame)
             pts = pts[signed_distance_to_plane(
                 pts, coeffs=coeffs, bias=bias) > -0.2]
-            pts = pts[signed_distance_to_plane(pts,coeffs,bias)< 0.05]
+            pts = pts[signed_distance_to_plane(pts, coeffs, bias) < 0.05]
             rotated_pts = transform(pts, M)  # 15% cpu
             # rotated_pts = rotated_pts[np.abs(rotated_pts[:, 2]) < 0.01]
             occ_grid = pts2og(rotated_pts[:, [0, 1]])

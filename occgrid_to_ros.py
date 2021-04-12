@@ -24,9 +24,10 @@ def init_node(disable_signals):
 # ---------------------------------------------------------------------------------
 
 
-def og_msg(occ_grid, map_resolution, map_size, time_stamp):
+def og_msg(occ_grid, map_resolution, map_width, map_height, time_stamp):
     MAP_RESOLUTION = map_resolution  # Unit: Meter
-    MAP_SIZE = map_size  # Unit: Meter, Shape: Square with center "base_link"
+    MAP_WIDTH = map_width  # Unit: Meter, Shape: Square with center "base_link"
+    MAP_HEIGHT = map_height
     map_img = cv2.flip(occ_grid, 0)
     map_img = cv2.rotate(map_img, cv2.ROTATE_90_COUNTERCLOCKWISE)
     # map_img = cv2.flip(map_img, 1)
@@ -40,15 +41,15 @@ def og_msg(occ_grid, map_resolution, map_size, time_stamp):
     map_msg.header.stamp = time_stamp
 
     map_msg.info = MapMetaData()
-    map_msg.info.height = int(MAP_SIZE / MAP_RESOLUTION)  # Unit: Pixel
+    map_msg.info.height = int(MAP_HEIGHT / MAP_RESOLUTION)  # Unit: Pixel
 
-    map_msg.info.width = int(MAP_SIZE / MAP_RESOLUTION)  # Unit: Pixel
+    map_msg.info.width = int(MAP_WIDTH / MAP_RESOLUTION)  # Unit: Pixel
     map_msg.info.resolution = MAP_RESOLUTION
 
     map_msg.info.origin = Pose()
     map_msg.info.origin.position = Point()
     map_msg.info.origin.position.x = 0  # Unit: Meter
-    map_msg.info.origin.position.y = -MAP_SIZE / 2  # Unit: Meter
+    map_msg.info.origin.position.y = -MAP_HEIGHT / 2  # Unit: Meter
     map_msg.info.origin.position.z = 0
     map_msg.info.origin.orientation = Quaternion()
     map_msg.info.origin.orientation.x = 0

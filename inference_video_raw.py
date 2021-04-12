@@ -1,5 +1,5 @@
 #!/home/tranquockhue/anaconda3/envs/tf2.2/bin/python
-from utils import contour_noise_removal, create_skeleton, enet_preprocessing
+from utils import contour_noise_removal, enet_preprocessing
 from models import ENET
 import occgrid_to_ros
 from bev import bev_transform_tools
@@ -34,11 +34,27 @@ logger = logging.Logger('lmao')
 # Initialize
 
 # ---------------------------------------------------------------------------------
-# @profile
 def main():
     global INPUT_SHAPE
     publisher = occgrid_to_ros.init_node(disable_signals=True)
     rate = rospy.Rate(15)
+    # =========== Section for reading ROS param, after initializing the node============================
+    node_name = rospy.get_name()
+    params_dict = {"width": 0, "height": 0, "cell_size": 0, "serial_no": ""}
+    for param in params_dict:
+        try:
+            value = rospy.get_param(node_name+"/"+param)
+            print(value)
+        except KeyError:  # rospy cannot find the desired parameters
+            raise KeyError("you lack a parameter: " + param)
+    params_dict[param] = value
+    og_width = rospy.get_param(params_dict["width"])
+    og_height = rospy.get_param(params_dict["height"])
+    cell_size = rospy.get_param(params_dict["cell_size"])
+    camera_serial_num = rospy.get_param(params_dict["serial_no"])
+
+    # ==================================================================================================
+
     gpus = tf.config.experimental.list_physical_devices('GPU')
     if gpus:
         try:
@@ -56,13 +72,11 @@ def main():
 
     pipeline = rs.pipeline()
     config = rs.config()
-    config.enable_device("841612070098")
+    config.enable_device(camera_serial_num)
     config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, 30)
-    # config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
-    print(config.can_resolve(pipeline))
-    profile = pipeline.start(config)
+    pipeline.start(config)
     # for debugging with video:
-    # cap = cv2.VideoCapture("test1.webm")
+    # cap = cv2.VideoCapture("img/test1.webm")
 
     # pc = rs.pointcloud()
     # ------------------------------------------------------------------------------
@@ -83,15 +97,8 @@ def main():
         pipeline_frames = pipeline.wait_for_frames()
         pipeline_rgb_frame = pipeline_frames.get_color_frame()
         rgb_frame = np.asanyarray(pipeline_rgb_frame.get_data())
+
         # ret, rgb_frame = cap.read()
-        # depth_frame = pipeline_frames.get_depth_frame()  # (h,w,z-axis)
-        # decimation_processed = decimation.process(depth_frame)
-        # spatial_processed = spatial.process(depth_frame)
-        # temporal_processed = temporal.process(spatial_processed)
-
-        # depth_frame_2_occ_grid(temporal_processed)
-
-        # ret, frame = cap.read()
         if (ret == True):
             # Prepocessing input
             # enet preprocessing bottleneck, jump from 30 to 80 % cpu
@@ -106,23 +113,21 @@ def main():
             # Remove road branches (or noise) that are not connected to main branches
             # Main road branches go from the bottom part of the RGB map
             # (should be) right front of the vehicle
-            # contour_noise_removed = contour_noise_removal(segmap)  # 5% cpu
+            contour_noise_removed = contour_noise_removal(segmap)  # 5% cpu
 
-            contour_noise_removed = segmap
+            #contour_noise_removed = segmap
             # # Need to resize to be the same with the image size in calibration process
 
             resized_segmap = cv2.resize(contour_noise_removed, INPUT_SHAPE)
             occ_grid = perspective_transformer.create_occupancy_grid(
                 resized_segmap, perspective_transformer._bev_matrix,
                 perspective_transformer.width, perspective_transformer.height,
-                perspective_transformer.map_size,
-                perspective_transformer.map_resolution,
+                og_width, og_height,
+                cell_size,
                 perspective_transformer.cm_per_px)
-            cv2.imshow("occgrid", occ_grid)
-            cv2.waitKey(1)
-            msg = occgrid_to_ros.og_msg(occ_grid,
-                                        perspective_transformer.map_resolution,
-                                        perspective_transformer.map_size, time_get_frame_ros)
+            msg = occgrid_to_ros.og_msg(occ_grid, cell_size,
+                                        og_width, og_height,
+                                        time_get_frame_ros)
             publisher.publish(msg)
             rate.sleep()
         if (ret == False):
@@ -130,4 +135,5 @@ def main():
     pipeline.stop()
 
 
-main()
+if __name__ == "__main__":
+    main()
