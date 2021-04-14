@@ -6,7 +6,7 @@ import cv2
 
 
 def test_bev():
-    transformer = bev_transform_tools.fromJSON("calibration_data.json")
+    transformer = bev_transform_tools.fromJSON("calibration_data_30fps.json")
     matrix = transformer._bev_matrix
     cap = cv2.VideoCapture(6)
     assert cap.isOpened()
@@ -28,4 +28,5 @@ def test_bev():
             break
 
 
-test_bev()
+if __name__ == "__main__":
+    test_bev()

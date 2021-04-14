@@ -1,3 +1,4 @@
+#!/home/thang/anaconda3/envs/tf2env/bin/python
 #!/home/tranquockhue/anaconda3/envs/tf2.2/bin/python
 from occgrid_to_ros import og_msg, OccupancyGrid
 import cv2
@@ -89,7 +90,11 @@ def signed_distance_to_plane(point, coeffs, bias):
 # =================================================================================
 if __name__ == "__main__":
     node = rospy.init_node("laser_high_cam", disable_signals=True)
-    pub = rospy.Publisher("/depth_front", OccupancyGrid, queue_size=3)
+    node_name, node_namespace = rospy.get_name(), rospy.get_namespace()
+    topic_name = rospy.get_param(node_name+"/topic_name")
+    camera_serial_num = rospy.get_param(node_name+"/serial_no")
+    pub = rospy.Publisher(node_namespace+topic_name,
+                          OccupancyGrid, queue_size=3)
     rate = rospy.Rate(20)
     M = np.load("rotmat_cam2bev.npy").astype(np.float32)
     z_axis_bev_frame = np.array([0, 0, 1])
@@ -102,7 +107,7 @@ if __name__ == "__main__":
     # ===================== INITIALIZING CAMERA=================================
     pipeline = rs.pipeline()
     config = rs.config()
-    config.enable_device("841612070098")
+    config.enable_device(camera_serial_num)
     config.enable_stream(rs.stream.depth, 848, 480, rs.format.z16, 30)
     profile = pipeline.start(config)
     pc = rs.pointcloud()

@@ -11,6 +11,7 @@ INPUT_SHAPE = {"30fps": (1920, 1080), "60fps": (960, 540)}
 FPS = 30
 MAP_SIZE = 10
 CELL_SIZE = 0.1
+WARPED_IMG_SHAPE = (768, 1024)
 
 
 def calibrate_with_median(corners_list):

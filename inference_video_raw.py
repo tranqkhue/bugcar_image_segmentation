@@ -1,8 +1,9 @@
-#!/home/tranquockhue/anaconda3/envs/tf2.2/bin/python
+#!/home/thang/anaconda3/envs/tf2env/bin/python
 from utils import contour_noise_removal, enet_preprocessing
 from models import ENET
 import occgrid_to_ros
 from bev import bev_transform_tools
+from nav_msgs.msg import OccupancyGrid
 from calibration import INPUT_SHAPE
 import pyrealsense2 as rs
 import time
@@ -36,23 +37,28 @@ logger = logging.Logger('lmao')
 # ---------------------------------------------------------------------------------
 def main():
     global INPUT_SHAPE
-    publisher = occgrid_to_ros.init_node(disable_signals=True)
+    rospy.init_node("image_segmentation", anonymous=True,
+                    disable_signals=True)
     rate = rospy.Rate(15)
     # =========== Section for reading ROS param, after initializing the node============================
-    node_name = rospy.get_name()
-    params_dict = {"width": 0, "height": 0, "cell_size": 0, "serial_no": ""}
+    node_name, node_namespace = rospy.get_name(), rospy.get_namespace()
+    print(node_name, node_namespace)
+    params_dict = {"width": 0, "height": 0,
+                   "cell_size": 0, "serial_no": "", "topic_name": ""}
     for param in params_dict:
         try:
             value = rospy.get_param(node_name+"/"+param)
-            print(value)
+            print("value", value)
         except KeyError:  # rospy cannot find the desired parameters
             raise KeyError("you lack a parameter: " + param)
     params_dict[param] = value
-    og_width = rospy.get_param(params_dict["width"])
-    og_height = rospy.get_param(params_dict["height"])
-    cell_size = rospy.get_param(params_dict["cell_size"])
-    camera_serial_num = rospy.get_param(params_dict["serial_no"])
-
+    og_width = params_dict["width"]
+    og_height = params_dict["height"]
+    cell_size = params_dict["cell_size"]
+    camera_serial_num = params_dict["serial_no"]
+    map_topic = params_dict["topic_name"]
+    publisher = rospy.Publisher(
+        node_namespace+map_topic, OccupancyGrid, queue_size=5, latch=False)
     # ==================================================================================================
 
     gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -115,7 +121,7 @@ def main():
             # (should be) right front of the vehicle
             contour_noise_removed = contour_noise_removal(segmap)  # 5% cpu
 
-            #contour_noise_removed = segmap
+            # contour_noise_removed = segmap
             # # Need to resize to be the same with the image size in calibration process
 
             resized_segmap = cv2.resize(contour_noise_removed, INPUT_SHAPE)

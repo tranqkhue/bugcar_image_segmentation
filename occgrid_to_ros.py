@@ -10,17 +10,6 @@ import cv2
 # ---------------------------------------------------------------------------------
 
 
-def init_node(disable_signals):
-    rospy.init_node("image_segmentation", anonymous=True,
-                    disable_signals=disable_signals)
-    map_topic = "map/image_segmentation"
-    OG_publisher = rospy.Publisher(map_topic,
-                                   OccupancyGrid,
-                                   queue_size=5,
-                                   latch=False)
-    return OG_publisher
-
-
 # ---------------------------------------------------------------------------------
 
 
