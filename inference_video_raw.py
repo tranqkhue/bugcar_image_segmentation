@@ -49,6 +49,7 @@ def main():
         try:
             value = rospy.get_param(node_name+"/"+param)
             print("value", value)
+            params_dict[param] = value
         except KeyError:  # rospy cannot find the desired parameters
             raise KeyError("you lack a parameter: " + param)
     params_dict[param] = value
