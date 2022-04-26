@@ -1,10 +1,11 @@
+#!/home/tranquockhue/anaconda3/envs/tf2.2/bin/python
 #!/home/thang/anaconda3/envs/tf2env/bin/python
-from utils import contour_noise_removal, enet_preprocessing
+from cameraType.realsense import RealsenseCamera
+from image_processing_utils import contour_noise_removal
 from models import ENET
 import occgrid_to_ros
 from bev import bev_transform_tools
 from nav_msgs.msg import OccupancyGrid
-from calibration import INPUT_SHAPE
 import pyrealsense2 as rs
 import time
 import rospy
@@ -36,7 +37,6 @@ logger = logging.Logger('lmao')
 
 # ---------------------------------------------------------------------------------
 def main():
-    global INPUT_SHAPE
     rospy.init_node("image_segmentation", anonymous=True,
                     disable_signals=True)
     rate = rospy.Rate(15)
@@ -44,20 +44,20 @@ def main():
     node_name, node_namespace = rospy.get_name(), rospy.get_namespace()
     print(node_name, node_namespace)
     params_dict = {"width": 0, "height": 0,
-                   "cell_size": 0, "serial_no": "", "topic_name": ""}
+                   "cell_size": 0, "topic_name":"", "pose":[]}
     for param in params_dict:
         try:
             value = rospy.get_param(node_name+"/"+param)
             print("value", value)
             params_dict[param] = value
         except KeyError:  # rospy cannot find the desired parameters
-            raise KeyError("you lack a parameter: " + param)
+            raise KeyError("you lack a parameter:" + param)
     params_dict[param] = value
-    og_width = params_dict["width"]
-    og_height = params_dict["height"]
-    cell_size = params_dict["cell_size"]
-    camera_serial_num = params_dict["serial_no"]
+    og_width_in_m = params_dict["width"]
+    og_height_in_m = params_dict["height"]
+    cell_size_in_m = params_dict["cell_size"]
     map_topic = params_dict["topic_name"]
+    camera_pose_wrt_to_baselink = params_dict["pose"]
     publisher = rospy.Publisher(
         node_namespace+map_topic, OccupancyGrid, queue_size=5, latch=False)
     # ==================================================================================================
@@ -70,50 +70,31 @@ def main():
                                                                     [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=800)])
         except RuntimeError as e:
             print(e)
+    # have an interface for model here
     model = ENET('./pretrained_models/enet.pb')
+
+# 
+    # read from json or yaml in ros?
     perspective_transformer = bev_transform_tools.fromJSON(
-        'calibration_data_30fps.json')
-    INPUT_SHAPE = INPUT_SHAPE["30fps"]
-    width = INPUT_SHAPE[0]
-    height = INPUT_SHAPE[1]
+        'calibration_data.json')
 
-    pipeline = rs.pipeline()
-    config = rs.config()
-    config.enable_device(camera_serial_num)
-    config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, 30)
-    pipeline.start(config)
-    # for debugging with video:
-    # cap = cv2.VideoCapture("img/test1.webm")
 
-    # pc = rs.pointcloud()
-    # ------------------------------------------------------------------------------
+    
 
-    # ------------------------------------------------------------------------------
-    # Realsense-based post-processing
-    decimation = rs.decimation_filter()
-    decimation.set_option(rs.option.filter_magnitude, 2)
-    spatial = rs.spatial_filter()
-    spatial.set_option(rs.option.filter_magnitude, 3)
-    spatial.set_option(rs.option.filter_smooth_alpha, 0.5)
-    spatial.set_option(rs.option.filter_smooth_delta, 50)
-    # temporal = rs.temporal_filter()
     # ------------------------------------------------------------------------------
     while True:
         t0 = time.time()
-        ret = True
-        pipeline_frames = pipeline.wait_for_frames()
-        pipeline_rgb_frame = pipeline_frames.get_color_frame()
-        rgb_frame = np.asanyarray(pipeline_rgb_frame.get_data())
-
-        # ret, rgb_frame = cap.read()
-        if (ret == True):
+        calibrated_input_shape = (perspective_transformer.input_width,perspective_transformer.input_height)
+        frameReleaser = RealsenseCamera("69420",calibrated_input_shape,30)
+        bgr_frame = frameReleaser.get_bgr_frame()
+        if (bgr_frame is not None):
             # Prepocessing input
             # enet preprocessing bottleneck, jump from 30 to 80 % cpu
-            batch_frame = enet_preprocessing(rgb_frame)
             time_get_frame_ros = rospy.Time.now()
+            batch_frame = model.preprocess(bgr_frame)
+            inference_result = model.predict(batch_frame)[0]
             # # rospy doesn't create bottleneck, it seems
             # # Run inference and process the results
-            inference_result = model.predict(batch_frame)[0]
             result_by_class = np.argmax(inference_result, axis=0)
             segmap = np.bitwise_or(result_by_class == 0, result_by_class == 1)\
                 .astype(np.uint8)
@@ -122,24 +103,19 @@ def main():
             # (should be) right front of the vehicle
             contour_noise_removed = contour_noise_removal(segmap)  # 5% cpu
 
-            # contour_noise_removed = segmap
-            # # Need to resize to be the same with the image size in calibration process
 
-            resized_segmap = cv2.resize(contour_noise_removed, INPUT_SHAPE)
+            # # Need to resize to the original image size in calibration process
+            # or else it will throw an error
+            resized_segmap = cv2.resize(contour_noise_removed, (perspective_transformer.input_width,perspective_transformer.input_height))
             occ_grid = perspective_transformer.create_occupancy_grid(
-                resized_segmap, perspective_transformer._bev_matrix,
-                perspective_transformer.width, perspective_transformer.height,
-                og_width, og_height,
-                cell_size,
-                perspective_transformer.cm_per_px)
-            msg = occgrid_to_ros.og_msg(occ_grid, cell_size,
-                                        og_width, og_height,
-                                        time_get_frame_ros)
+                resized_segmap,
+                og_width_in_m, og_height_in_m,
+                cell_size_in_m)
+
+            msg = occgrid_to_ros.convert_to_occupancy_grid_msg(occ_grid, cell_size_in_m,
+                                        og_width_in_m, og_height_in_m,time_get_frame_ros,camera_pose_wrt_to_baselink)
             publisher.publish(msg)
             rate.sleep()
-        if (ret == False):
-            break
-    pipeline.stop()
 
 
 if __name__ == "__main__":

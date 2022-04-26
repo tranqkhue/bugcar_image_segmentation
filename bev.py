@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 from numpy import pi, cos, sin
 import json
-from utils import order_points
+from .utils import order_points_counter_clockwise
 
 
 class bev_transform_tools:
@@ -10,30 +10,31 @@ class bev_transform_tools:
     # dist2target : distance from camera to the target: denoted (x,y) (cm)
     # x is the horizontal distance
     # y is the vertical distance
-    def __init__(self, image_shape, dist2target, tile_length, cm_per_px, yaw):
-        self.width = image_shape[0]
-        self.height = image_shape[1]
+    def __init__(self,input_image_shape, desired_image_shape, dist2target, tile_length, cm_per_px, yaw):
+        self.input_width = input_image_shape[0]
+        self.input_height = input_image_shape[1]
+        self.after_warp_width = desired_image_shape[0]
+        self.after_warp_height = desired_image_shape[1]
         self.dist2target = dist2target
         self.tile_length = tile_length  # in cm
         self.cm_per_px = cm_per_px
         self.yaw = yaw
-        self.skeleton_image = cv2.imread(
-            "segmap_boundaries_in_occ_grid.jpg", cv2.IMREAD_GRAYSCALE)
+
 
     @classmethod
     def fromJSON(cls, filepath):
         f = open(filepath, mode="r")
-        print(f)
         data = json.load(f)
 
-        shape = data["size"]
+        shape = data["output image size"]
+        input_shape = data["input image size"]
         bev_matrix = np.reshape(np.array(data['bev matrix']),
                                 (3, 3))
         dist2target = data["distance to target"]
         tile_length = data["tile_length"]
         cm_per_px = data['cm_per_px']
         yaw = data['yaw']
-        bev = cls(shape, dist2target, tile_length, cm_per_px, yaw)
+        bev = cls(input_shape,shape, dist2target, tile_length, cm_per_px, yaw)
         bev._bev_matrix = bev_matrix
         return bev
 
@@ -42,7 +43,8 @@ class bev_transform_tools:
         f = open(file_path, mode="w")
 
         data = {
-            "size": (self.width, self.height),
+            "input image size": (self.input_width,self.input_height),
+            "output image size": (self.after_warp_width, self.after_warp_height),
             "bev matrix": self._bev_matrix.tolist(),
             "distance to target": self.dist2target,
             "tile_length": self.tile_length,
@@ -51,11 +53,12 @@ class bev_transform_tools:
         }
         json.dump(data, f)
 
-    def calculate_transform_matrix(self, tile_coords, dist2target, cm_per_px,
-                                   width, height, tile_length, yaw):
-        dist2target_px = (dist2target[0] / cm_per_px,
-                          dist2target[1] / cm_per_px)
-        max_height = tile_length / cm_per_px
+    def calculate_transform_matrix(self, tile_coords):
+        cm_per_px = self.cm_per_px
+        yaw = self.yaw
+        dist2target_px = (self.dist2target[0] / cm_per_px,
+                          self.dist2target[1] / cm_per_px)
+        max_height = self.tile_length / cm_per_px
         original_pts = np.array([[max_height / 2, max_height / 2],
                                  [max_height / 2, -max_height / 2],
                                  [-max_height / 2, -max_height / 2],
@@ -66,8 +69,8 @@ class bev_transform_tools:
                                     [np.sin(yaw), np.cos(yaw)]])
         unit_vec_along_x = np.array([100, 0])
         rotated_unit_vec = np.matmul(yaw_fid2bev_mat, unit_vec_along_x)
-        target_in_img = (width / 2 + dist2target_px[0],
-                         height - dist2target_px[1])
+        target_in_img = (self.after_warp_width / 2 + dist2target_px[0],
+                         self.after_warp_height - dist2target_px[1])
         rotated_unit_vec += target_in_img
         bev_fiducial_axis = np.stack(
             [np.asarray(target_in_img), rotated_unit_vec], axis=0)
@@ -77,7 +80,7 @@ class bev_transform_tools:
         for i in range(len(original_pts)):
             rotated_pts[i] = np.matmul(yaw_fid2bev_mat, original_pts[i])
         rotated_pts += target_in_img
-        rotated_pts = order_points(rotated_pts, bev_fiducial_axis)
+        rotated_pts = order_points_counter_clockwise(rotated_pts, bev_fiducial_axis)
         print("transformed corners", rotated_pts)
 
         M = cv2.getPerspectiveTransform(tile_coords.astype(np.float32),
@@ -89,21 +92,26 @@ class bev_transform_tools:
 
     # --------------------------------------------------------------------------------------
 
-    def create_occupancy_grid(self, segmap, bev_matrix, width, height,
-                              occupancy_grid_width_in_m, occupancy_grid_height_in_m, cell_size_in_m,
-                              cm_per_px):
-        # segmap must have the same size
-        cell_size = (cell_size_in_m * 100 / cm_per_px)
+    def create_occupancy_grid(self, segmap,
+                              occupancy_grid_width_in_m, occupancy_grid_height_in_m, cell_size_in_m):
+        # segmap must have the same size, or else throw an error.
+        assert segmap.shape == (self.input_width,self.input_height),"current segmap size: {},the segmap's original size must be the same as the required input shape, which is {}"\
+                                                                    .format(segmap.shape,(self.input_width,self.input_height))
+        
+        cell_size_in_px = (cell_size_in_m * 100 / self.cm_per_px)
         occ_grid_width = int(occupancy_grid_width_in_m / cell_size_in_m)
-        occ_width_pixel = int(occ_grid_width * cell_size)
+        occ_width_pixel = int(occ_grid_width * cell_size_in_px)
         occ_grid_height = int(occupancy_grid_height_in_m / cell_size_in_m)
-        occ_height_pixel = int(occ_grid_height*cell_size)
+        occ_height_pixel = int(occ_grid_height*cell_size_in_px)
         segmap = np.add(segmap, 1)
-        warped_img = cv2.warpPerspective(segmap, bev_matrix, (width, height))
-        left_x = int((width - occ_width_pixel) / 2)
-        top_y = height - occ_height_pixel
+        # cv2.imshow("map",100*segmap.astype(np.uint8))
+        warped_img_width = self.after_warp_width
+        warped_img_height = self.after_warp_height
+        warped_img = cv2.warpPerspective(segmap, self._bev_matrix, (warped_img_width, warped_img_height))
+        left_x = int((warped_img_width - occ_width_pixel) / 2)
+        top_y = warped_img_height - occ_height_pixel
         warped_left_x = int(np.clip(left_x, 0, np.inf))
-        warped_img = warped_img[int(np.clip(top_y, 0, np.Inf)):height,
+        warped_img = warped_img[int(np.clip(top_y, 0, np.Inf)):warped_img_height,
                                 warped_left_x:warped_left_x + occ_width_pixel]
         occ_grid_left_x = int(np.clip(-left_x, 0, np.inf))
         occ_grid_top_y = int(np.clip(-top_y, 0, np.inf))
@@ -115,6 +123,7 @@ class bev_transform_tools:
         template_occ_grid = template_occ_grid.astype(np.uint8)
         isOccupiedGrid = (template_occ_grid == 1).astype(np.uint8)
         morphKernel = np.ones((3, 3))
+
         morphGrid = cv2.morphologyEx(
             isOccupiedGrid, cv2.MORPH_OPEN, kernel=morphKernel)
         mask1 = (morphGrid > 0).astype(np.uint8)
@@ -124,6 +133,7 @@ class bev_transform_tools:
             template_occ_grid,
             (occ_grid_width, occ_grid_height), interpolation=cv2.INTER_NEAREST
         ) * 100
+
         occupancy_grid = np.where(occupancy_grid == 0, -1,
                                   200 - occupancy_grid).astype(np.int8)
         return occupancy_grid
