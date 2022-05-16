@@ -107,6 +107,8 @@ class bev_transform_tools:
         # cv2.imshow("map",100*segmap.astype(np.uint8))
         warped_img_width = self.after_warp_width
         warped_img_height = self.after_warp_height
+
+        # warp persperctive cost 3-4% cpu
         warped_img = cv2.warpPerspective(segmap, self._bev_matrix, (warped_img_width, warped_img_height))
         left_x = int((warped_img_width - occ_width_pixel) / 2)
         top_y = warped_img_height - occ_height_pixel

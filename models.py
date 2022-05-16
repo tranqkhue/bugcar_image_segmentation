@@ -3,7 +3,7 @@ import tensorflow as tf
 import numpy as np
 from abc import ABC
 
-from bugcar_image_segmentation.image_processing_utils import contour_noise_removal
+from .image_processing_utils import contour_noise_removal
 
 class InferenceModel(ABC):
     def predict(self,preprocessed_image):
@@ -18,8 +18,10 @@ class ENET(InferenceModel):
     IMAGE_STD = np.array([0.229, 0.224, 0.225])
     input_size = (512, 256)
 
-    def __init__(self, GRAPH_PB_PATH):
+    def __init__(self, GRAPH_PB_PATH=None):
         self.sess = tf.compat.v1.Session()
+        if GRAPH_PB_PATH == None:
+            GRAPH_PB_PATH = "./pretrained_models/enet.pb"
         with tf.compat.v1.gfile.GFile(GRAPH_PB_PATH, 'rb') as f:
             string = f.read()
             graph_def = tf.compat.v1.GraphDef()
@@ -27,6 +29,15 @@ class ENET(InferenceModel):
             self.sess.graph.as_default()
             tf.import_graph_def(graph_def, name='')
             self.test = None
+    # def __init__(self):
+    #     self.sess = tf.compat.v1.Session()
+    #     with tf.compat.v1.gfile.GFile("./pretrained_models/enet.pb", 'rb') as f:
+    #         string = f.read()
+    #         graph_def = tf.compat.v1.GraphDef()
+    #         graph_def.ParseFromString(string)
+    #         self.sess.graph.as_default()
+    #         tf.import_graph_def(graph_def, name='')
+    #         self.test = None
     # @profile
     def predict(self, preprocessed_imgs):
         segmap = self.sess.run(self.OUTPUT_TENSOR_NAME,
