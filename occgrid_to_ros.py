@@ -24,10 +24,10 @@ def convert_to_occupancy_grid_msg(occ_grid, map_resolution, map_width, map_heigh
     occupancy_grid = map_img.flatten()
     occupancy_grid = occupancy_grid.tolist()
 
-    rotation = R.from_euler("xyz",pose[3:])
-    r = rotation.as_quat()
-    r_mat = rotation.as_matrix()
-    first_cell_location_in_bev_frame = np.array([0,-MAP_WIDTH/2,0])
+    rotation_from_bev_frame_to_desired_frame = R.from_euler("xyz",pose[3:])
+    r = rotation_from_bev_frame_to_desired_frame.as_quat()
+    r_mat = rotation_from_bev_frame_to_desired_frame.as_matrix()
+    first_cell_location_in_bev_frame = np.array([0,-MAP_WIDTH/2,0])+pose[:3]
     first_cell_location_in_desired_frame = np.matmul(r_mat,first_cell_location_in_bev_frame)
     map_msg = OccupancyGrid()
 

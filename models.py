@@ -16,7 +16,7 @@ class ENET(InferenceModel):
     OUTPUT_TENSOR_NAME = "CATkrIDy/concat:0"
     IMAGE_MEAN = np.array([0.485, 0.456, 0.406])
     IMAGE_STD = np.array([0.229, 0.224, 0.225])
-    input_size = (512, 256)
+    INPUT_WIDTH, INPUT_HEIGHT = (512, 256)
 
     def __init__(self, GRAPH_PB_PATH=None):
         self.sess = tf.compat.v1.Session()
@@ -59,9 +59,10 @@ class ENET(InferenceModel):
         return np_segmap_by_class 
 
     @classmethod
-    def preprocess(cls,bgr_frame):
+    def preprocess(cls, bgr_frame):
         """ preprocess a bgr image to fit in enet model """
-        resized = cv2.resize(bgr_frame, cls.input_size)
+        resized = cv2.resize(bgr_frame, (cls.INPUT_WIDTH, cls.INPUT_HEIGHT))
+        # cv2.imshow("resized",resized)
         rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
         # Normalize, some statistics and stack into a batch for interference
         normalized = (rgb / 256.0 - cls.IMAGE_MEAN)/cls.IMAGE_STD

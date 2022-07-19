@@ -3,14 +3,14 @@ import numpy as np
 from numpy import pi, cos, sin
 import json
 from .utils import order_points_counter_clockwise
-
+import numpy_indexed as npi
 
 class bev_transform_tools:
 
     # dist2target : distance from camera to the target: denoted (x,y) (cm)
     # x is the horizontal distance
     # y is the vertical distance
-    def __init__(self,input_image_shape, desired_image_shape, dist2target, tile_length, cm_per_px, yaw):
+    def __init__(self,input_image_shape, desired_image_shape, dist2target, tile_length, cm_per_px, yaw,make_laserscan_like=False):
         self.input_width = input_image_shape[0]
         self.input_height = input_image_shape[1]
         self.after_warp_width = desired_image_shape[0]
@@ -19,7 +19,7 @@ class bev_transform_tools:
         self.tile_length = tile_length  # in cm
         self.cm_per_px = cm_per_px
         self.yaw = yaw
-
+        self.laserscan_like_occupancy_grid = make_laserscan_like
 
     @classmethod
     def fromJSON(cls, filepath):
@@ -34,7 +34,9 @@ class bev_transform_tools:
         tile_length = data["tile_length"]
         cm_per_px = data['cm_per_px']
         yaw = data['yaw']
-        bev = cls(input_shape,shape, dist2target, tile_length, cm_per_px, yaw)
+        is_laserscan = data['is_laserscan']
+        print(is_laserscan)
+        bev = cls(input_shape,shape, dist2target, tile_length, cm_per_px, yaw,is_laserscan)
         bev._bev_matrix = bev_matrix
         return bev
 
@@ -131,11 +133,34 @@ class bev_transform_tools:
         mask1 = (morphGrid > 0).astype(np.uint8)
         subtract_mask = cv2.subtract(isOccupiedGrid, mask1)
         template_occ_grid = np.where(subtract_mask > 0, 2, template_occ_grid)
+
+
+
         occupancy_grid = cv2.resize(
             template_occ_grid,
             (occ_grid_width, occ_grid_height), interpolation=cv2.INTER_NEAREST
         ) * 100
-
         occupancy_grid = np.where(occupancy_grid == 0, -1,
-                                  200 - occupancy_grid).astype(np.int8)
-        return occupancy_grid
+                                  200 - occupancy_grid).astype(np.uint8)
+        if self.laserscan_like_occupancy_grid:
+            shape = (occupancy_grid.shape[1],occupancy_grid.shape[0])
+            longer_size = max(shape[0],shape[1])
+            polar_transformed = cv2.warpPolar(occupancy_grid, shape, (occupancy_grid.shape[1]/2-1,occupancy_grid.shape[0]), longer_size,cv2.WARP_POLAR_LINEAR)
+            # find all occupied point
+            # print("template histogram",np.histogram(occupancy_grid))
+            # print("polar hist",np.histogram(polar_transformed))
+            empty_array = np.zeros(polar_transformed.shape)
+
+            vc = np.where(polar_transformed==100)
+            xxx = np.transpose(np.stack((vc[0],vc[1])))
+            min_index_xy = npi.group_by(xxx[:,0]).min(xxx[:,1])
+            for i,min_index_x in enumerate(min_index_xy[1]):
+                empty_array = cv2.circle(empty_array,(min_index_x,min_index_xy[0][i]),1,100,-1)
+            
+            new_occ_grid = cv2.warpPolar(empty_array, shape, (occupancy_grid.shape[1]/2-1,occupancy_grid.shape[0]), longer_size,cv2.WARP_INVERSE_MAP)
+            new_occ_grid = new_occ_grid.astype(np.int8)
+            # print(np.histogram(new_occ_grid))
+            new_occ_grid[occupancy_grid==255] = -1
+            return occupancy_grid.astype(np.int8),new_occ_grid
+        return occupancy_grid.astype(np.int8)
+
