@@ -42,20 +42,43 @@ class ENET(InferenceModel):
     def predict(self, preprocessed_imgs):
         segmap = self.sess.run(self.OUTPUT_TENSOR_NAME,
                                feed_dict={self.INPUT_TENSOR_NAME: preprocessed_imgs})
+        # flat_objects = [2,9] #only pavement and vegetation
+        # we will denote : 
+        # 1 road
+        # 0 flat non-road object which incclude only pavement and vegetation in this case
+        # 2 non flat objects, which is the rest
+
+
         # predict shape will have size (batch_size,num_of_class,h,w)
-        # print("predict shape",segmap.shape)
+        print("predict shape",segmap.shape)
         # result_by_class = np.argmax(segmap, axis=0)
         result_by_class = tf.math.argmax(segmap, axis=1) # TF accelerates this step. Don't know why
-        # print("result_by_class shape",result_by_class.shape)
-
-        # segmap_by_class = np.bitwise_or(result_by_class == 0, result_by_class == 1).astype(np.uint8)
+        segmap_by_class = tf.ones(result_by_class.shape)*2
+        segmap_by_class =  tf.where(tf.logical_or(result_by_class==2,result_by_class==9),0,segmap_by_class)
+        segmap_by_class =  tf.where(tf.logical_or(result_by_class==0,result_by_class==1),1,segmap_by_class)
+        # for i in range(15):
+        #     hay = np.where(result_by_class.numpy().astype(np.float32)[0]==i,1.0,0.0)
+        #     hay = np.stack([hay,hay,hay],axis=2)
+        #     print(hay.shape)
+        #     cv2.imshow("asd"+str(i),hay)
+        # x = cv2.applyColorMap(result_by_class.numpy().astype(np.uint8)[0]*15, cv2.COLORMAP_JET)
+        # cv2.imshow("x",x)
+        # cv2.waitKey(1)
+        np_segmap_by_class = segmap_by_class.numpy().astype(np.uint8)
+        # print(np_segmap_by_class)
+        return np_segmap_by_class 
+    def predict_binary(self, preprocessed_imgs):
+        segmap = self.sess.run(self.OUTPUT_TENSOR_NAME,
+                               feed_dict={self.INPUT_TENSOR_NAME: preprocessed_imgs})
+        # we will denote : 
+        # 1 road
+        # 0 non-road object 
+        # predict shape will have size (batch_size,num_of_class,h,w)
+        # result_by_class = np.argmax(segmap, axis=0)
+        result_by_class = tf.math.argmax(segmap, axis=1) # TF accelerates this step. Don't know why  
         segmap_by_class = tf.bitwise.bitwise_or(tf.cast(result_by_class == 0, tf.uint8), \
                                                 tf.cast(result_by_class == 1, tf.uint8))
         np_segmap_by_class = segmap_by_class.numpy()
-        # Remove road branches (or noise) that are not connected to main branches
-        # Main road branches go from the bottom part of the RGB map
-        # (should be) right front of the vehicle
-        # contour_noise_removed = contour_noise_removal(segmap)  # 5% cpu
         return np_segmap_by_class 
 
     @classmethod
